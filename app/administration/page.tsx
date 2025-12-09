@@ -720,14 +720,16 @@ export default function AdministrationPage() {
                       <div className="space-y-2">
                         <Label>Trimestre Parent</Label>
                         <Select
-                          value={periodForm.parent_id}
-                          onValueChange={(v) => setPeriodForm((prev) => ({ ...prev, parent_id: v }))}
+                          value={periodForm.parent_id || "no-parent"}
+                          onValueChange={(v) =>
+                            setPeriodForm((prev) => ({ ...prev, parent_id: v === "no-parent" ? "" : v }))
+                          }
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Sélectionner un trimestre" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="none">Aucun</SelectItem>
+                            <SelectItem value="no-parent">Aucun</SelectItem>
                             {trimesters.map((t) => (
                               <SelectItem key={t.id} value={t.id}>
                                 {t.name}
