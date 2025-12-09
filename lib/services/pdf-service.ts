@@ -31,6 +31,15 @@ function replaceOklchColors(element: HTMLElement): Map<HTMLElement, string> {
     // Destructive (red)
     "oklch(0.577 0.245 27.325)": "#dc2626",
     "oklch(0.637 0.237 25.331)": "#ef4444",
+    // Blue colors
+    "oklch(0.623 0.214 259.815)": "#2563eb",
+    "oklch(0.707 0.165 254.624)": "#3b82f6",
+    // Purple colors
+    "oklch(0.627 0.265 303.9)": "#9333ea",
+    "oklch(0.714 0.203 305.504)": "#a855f7",
+    // Yellow/Amber
+    "oklch(0.769 0.188 70.08)": "#f59e0b",
+    "oklch(0.828 0.189 84.429)": "#fbbf24",
   }
 
   const allElements = element.querySelectorAll("*")
@@ -47,6 +56,8 @@ function replaceOklchColors(element: HTMLElement): Map<HTMLElement, string> {
         "borderBottomColor",
         "borderLeftColor",
         "borderRightColor",
+        "outlineColor",
+        "boxShadow",
       ]
 
       let hasOklch = false
@@ -64,7 +75,6 @@ function replaceOklchColors(element: HTMLElement): Map<HTMLElement, string> {
               break
             }
           }
-          // Try to extract and convert oklch values
           const oklchMatch = value.match(/oklch$$([^)]+)$$/)
           if (oklchMatch) {
             const parts = oklchMatch[1].split(/\s+/)

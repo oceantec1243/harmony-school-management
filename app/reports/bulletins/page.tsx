@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { PageHeader } from "@/components/ui/page-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton"
 import { StudentAvatar } from "@/components/students/student-avatar"
 import { Download, Search, Eye, Loader2, Printer, FileArchive } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { createBrowserClient } from "@supabase/ssr"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { BulletinDocument } from "@/components/reports/bulletin-document"
@@ -30,13 +30,13 @@ type Student = {
   class?: { name: string }
 }
 
-type ClassType = { id: string; name: string }
+type ClassType = { id: string; name: string; level_id: string }
 type AcademicPeriod = { id: string; name: string; type: string; academic_year: string }
 
 export default function BulletinsPage() {
-  const [selectedClass, setSelectedClass] = useState<string>("")
-  const [selectedStudent, setSelectedStudent] = useState<string>("")
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("")
+  const [selectedClass, setSelectedClass] = useState("")
+  const [selectedStudent, setSelectedStudent] = useState("")
+  const [selectedPeriod, setSelectedPeriod] = useState("")
   const [bulletinType, setBulletinType] = useState<"sequence" | "trimester" | "year">("sequence")
   const [searchQuery, setSearchQuery] = useState("")
   const [showBulletin, setShowBulletin] = useState(false)
@@ -50,38 +50,39 @@ export default function BulletinsPage() {
   const [bulletinData, setBulletinData] = useState<any>(null)
   const [schoolSettings, setSchoolSettings] = useState<any>(null)
 
-  const supabase = createClient()
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  )
 
-  // Fetch initial data
   useEffect(() => {
     async function fetchInitialData() {
       setLoading(true)
       try {
         const [classesRes, periodsRes, settingsRes] = await Promise.all([
-          supabase.from("classes").select("id, name").order("name"),
+          supabase.from("classes").select("id, name, level_id").order("name"),
           supabase.from("academic_periods").select("*").order("number"),
-          supabase.from("school_settings").select("*").maybeSingle(),
+          supabase.from("school_settings").select("*").limit(1),
         ])
 
         setClasses(classesRes.data || [])
         setPeriods(periodsRes.data || [])
         setSchoolSettings(
-          settingsRes.data || {
+          settingsRes.data?.[0] || {
             school_name: "HARMONY School",
-            school_slogan: "L'harmonie entre technologie et éducation",
+            school_slogan: "L'excellence au service de l'éducation",
             current_academic_year: "2024-2025",
           },
         )
       } catch (error) {
-        console.error("[v0] Error fetching initial data:", error)
+        console.error("Error fetching initial data:", error)
       } finally {
         setLoading(false)
       }
     }
     fetchInitialData()
-  }, [supabase])
+  }, [])
 
-  // Fetch students when class changes
   useEffect(() => {
     async function fetchStudents() {
       if (!selectedClass) {
@@ -91,20 +92,18 @@ export default function BulletinsPage() {
 
       const { data } = await supabase
         .from("students")
-        .select(`
-          id, matricule, first_name, last_name, date_of_birth, place_of_birth, gender, class_id,
-          class:classes(name)
-        `)
+        .select(
+          "id, matricule, first_name, last_name, date_of_birth, place_of_birth, gender, class_id, class:classes(name)",
+        )
         .eq("class_id", selectedClass)
-        .eq("status", "Active")
+        .ilike("status", "active")
         .order("last_name")
 
       setStudents(data || [])
     }
     fetchStudents()
-  }, [supabase, selectedClass])
+  }, [selectedClass])
 
-  // Filter students based on search
   const filteredStudents = students.filter(
     (s) =>
       s.first_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -112,170 +111,218 @@ export default function BulletinsPage() {
       s.matricule.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  const generateBulletin = async (studentId: string) => {
-    if (!selectedPeriod) {
-      toast.error("Veuillez sélectionner une période")
-      return
-    }
-
-    setGenerating(true)
-    setSelectedStudent(studentId)
-
-    try {
-      // Get student data
-      const { data: student } = await supabase
-        .from("students")
-        .select(`
-          *,
-          class:classes(
-            *,
-            level:levels(*),
-            section:sections(*)
-          )
-        `)
-        .eq("id", studentId)
-        .single()
-
-      if (!student) throw new Error("Élève non trouvé")
-
-      // Get period
-      const { data: period } = await supabase.from("academic_periods").select("*").eq("id", selectedPeriod).single()
-
-      // Get class subjects
-      const { data: classSubjects } = await supabase
-        .from("class_subjects")
-        .select(`
-          id, subject_id, coefficient,
-          subject:subjects(id, name, code, subject_group:subject_groups(id, name, order))
-        `)
-        .eq("class_id", student.class_id)
-
-      // Get all students in class for ranking
-      const { data: classStudents } = await supabase
-        .from("students")
-        .select("id")
-        .eq("class_id", student.class_id)
-        .eq("status", "Active")
-
-      // Get grades for all students
-      const studentIds = (classStudents || []).map((s) => s.id)
-      const { data: allGrades } = await supabase
-        .from("grades")
-        .select("student_id, subject_id, score, coefficient")
-        .in("student_id", studentIds)
-        .eq("academic_period_id", selectedPeriod)
-
-      // Format subjects
-      const subjects = (classSubjects || [])
-        .filter((cs) => cs.subject)
-        .map((cs) => ({
-          id: cs.subject_id,
-          name: cs.subject?.name || "",
-          code: cs.subject?.code || "",
-          coefficient: cs.coefficient,
-          group_id: cs.subject?.subject_group?.id || "",
-          group_name: cs.subject?.subject_group?.name || "",
-          group_order: cs.subject?.subject_group?.order || 0,
-        }))
-        .sort((a, b) => a.group_order - b.group_order || a.name.localeCompare(b.name))
-
-      // Get student's grades
-      const studentGrades = (allGrades || []).filter((g) => g.student_id === studentId)
-      const grades: Record<string, { score: number; coefficient: number }> = {}
-
-      subjects.forEach((subject) => {
-        const grade = studentGrades.find((g) => g.subject_id === subject.id)
-        if (grade) {
-          grades[subject.id] = {
-            score: grade.score,
-            coefficient: subject.coefficient,
-          }
-        }
-      })
-
-      // Calculate group averages
-      const groupAverages: Record<string, number> = {}
-      const groups = [...new Set(subjects.map((s) => s.group_name))]
-
-      groups.forEach((groupName) => {
-        const groupSubjects = subjects.filter((s) => s.group_name === groupName)
-        let totalWeighted = 0
-        let totalCoef = 0
-
-        groupSubjects.forEach((subject) => {
-          const grade = grades[subject.id]
-          if (grade) {
-            totalWeighted += grade.score * grade.coefficient
-            totalCoef += grade.coefficient
-          }
-        })
-
-        if (totalCoef > 0) {
-          groupAverages[groupName] = Math.round((totalWeighted / totalCoef) * 100) / 100
-        }
-      })
-
-      // Calculate all students' averages for ranking
-      const studentAverages = (classStudents || []).map((s) => {
-        const sGrades = (allGrades || []).filter((g) => g.student_id === s.id)
-        let totalWeighted = 0
-        let totalCoef = 0
-
-        subjects.forEach((subject) => {
-          const grade = sGrades.find((g) => g.subject_id === subject.id)
-          if (grade) {
-            totalWeighted += grade.score * subject.coefficient
-            totalCoef += subject.coefficient
-          }
-        })
-
-        return {
-          studentId: s.id,
-          average: totalCoef > 0 ? totalWeighted / totalCoef : 0,
-        }
-      })
-
-      // Sort and find rank
-      studentAverages.sort((a, b) => b.average - a.average)
-      let rank = 1
-      for (let i = 0; i < studentAverages.length; i++) {
-        if (i > 0 && studentAverages[i].average < studentAverages[i - 1].average) {
-          rank = i + 1
-        }
-        if (studentAverages[i].studentId === studentId) {
-          break
-        }
+  const generateBulletin = useCallback(
+    async (studentId: string) => {
+      if (!selectedPeriod) {
+        toast.error("Veuillez sélectionner une période")
+        return
       }
 
-      const thisStudentData = studentAverages.find((s) => s.studentId === studentId)
-      const average = thisStudentData ? Math.round(thisStudentData.average * 100) / 100 : 0
+      setGenerating(true)
+      setSelectedStudent(studentId)
 
-      const classAverage =
-        studentAverages.length > 0
-          ? Math.round((studentAverages.reduce((sum, s) => sum + s.average, 0) / studentAverages.length) * 100) / 100
-          : 0
+      try {
+        // Get student data with class info
+        const { data: student, error: studentError } = await supabase
+          .from("students")
+          .select("*, class:classes(*, level:levels(*), section:sections(*))")
+          .eq("id", studentId)
+          .single()
 
-      setBulletinData({
-        student,
-        class: student.class,
-        period,
-        subjects,
-        grades,
-        groupAverages,
-        average,
-        rank,
-        classSize: (classStudents || []).length,
-        classAverage,
-      })
+        if (studentError || !student) throw new Error("Élève non trouvé")
 
-      setShowBulletin(true)
-    } catch (error) {
-      console.error("[v0] Error generating bulletin:", error)
-      toast.error("Erreur lors de la génération du bulletin")
-    } finally {
-      setGenerating(false)
-    }
-  }
+        // Get period
+        const { data: period, error: periodError } = await supabase
+          .from("academic_periods")
+          .select("*")
+          .eq("id", selectedPeriod)
+          .single()
+
+        if (periodError) throw periodError
+
+        const levelId = student.class?.level_id
+        const classId = student.class_id
+
+        // Fetch class subjects - simple query without ordering
+        const { data: classSubjectsData, error: csError } = await supabase
+          .from("class_subjects")
+          .select(
+            "id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))",
+          )
+          .eq("class_id", classId)
+
+        if (csError) {
+          console.error("class_subjects error:", csError)
+        }
+
+        // Fetch level subjects (tronc commun) - simple query without ordering
+        let levelSubjectsData: any[] = []
+        if (levelId) {
+          const { data, error } = await supabase
+            .from("level_subjects")
+            .select(
+              "id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))",
+            )
+            .eq("level_id", levelId)
+
+          if (error) {
+            console.error("level_subjects error:", error)
+          }
+          levelSubjectsData = data || []
+        }
+
+        // Combine subjects - class subjects take priority
+        const subjectsMap = new Map<string, any>()
+
+        // Add class subjects first
+        if (classSubjectsData) {
+          for (const cs of classSubjectsData) {
+            if (cs.subject && cs.subject_id) {
+              const subj = cs.subject as any
+              subjectsMap.set(cs.subject_id, {
+                id: cs.subject_id,
+                name: subj.name || "",
+                code: subj.code || "",
+                coefficient: cs.coefficient || 1,
+                group_id: subj.subject_group?.id || "",
+                group_name: subj.subject_group?.name || "Autres",
+              })
+            }
+          }
+        }
+
+        // Add level subjects (tronc commun) - skip if already in class
+        for (const ls of levelSubjectsData) {
+          if (ls.subject && ls.subject_id && !subjectsMap.has(ls.subject_id)) {
+            const subj = ls.subject as any
+            subjectsMap.set(ls.subject_id, {
+              id: ls.subject_id,
+              name: subj.name || "",
+              code: subj.code || "",
+              coefficient: ls.coefficient || 1,
+              group_id: subj.subject_group?.id || "",
+              group_name: subj.subject_group?.name || "Autres",
+            })
+          }
+        }
+
+        const subjects = Array.from(subjectsMap.values()).sort(
+          (a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name),
+        )
+
+        // Get all students in class for ranking
+        const { data: classStudents } = await supabase
+          .from("students")
+          .select("id")
+          .eq("class_id", classId)
+          .ilike("status", "active")
+
+        // Get grades for all students
+        const studentIds = (classStudents || []).map((s) => s.id)
+        const subjectIds = subjects.map((s) => s.id)
+
+        let allGrades: any[] = []
+        if (studentIds.length > 0 && subjectIds.length > 0) {
+          const { data: gradesData } = await supabase
+            .from("grades")
+            .select("student_id, subject_id, score")
+            .in("student_id", studentIds)
+            .in("subject_id", subjectIds)
+            .eq("academic_period_id", selectedPeriod)
+          allGrades = gradesData || []
+        }
+
+        // Get student's grades
+        const studentGrades = allGrades.filter((g) => g.student_id === studentId)
+        const grades: Record<string, { score: number; coefficient: number }> = {}
+
+        subjects.forEach((subject) => {
+          const grade = studentGrades.find((g) => g.subject_id === subject.id)
+          if (grade) {
+            grades[subject.id] = { score: grade.score, coefficient: subject.coefficient }
+          }
+        })
+
+        // Calculate group averages
+        const groupAverages: Record<string, number> = {}
+        const groups = [...new Set(subjects.map((s) => s.group_name))]
+
+        groups.forEach((groupName) => {
+          const groupSubjects = subjects.filter((s) => s.group_name === groupName)
+          let totalWeighted = 0
+          let totalCoef = 0
+
+          groupSubjects.forEach((subject) => {
+            const grade = grades[subject.id]
+            if (grade) {
+              totalWeighted += grade.score * grade.coefficient
+              totalCoef += grade.coefficient
+            }
+          })
+
+          if (totalCoef > 0) {
+            groupAverages[groupName] = Math.round((totalWeighted / totalCoef) * 100) / 100
+          }
+        })
+
+        // Calculate all students' averages for ranking
+        const studentAverages = (classStudents || []).map((s) => {
+          const sGrades = allGrades.filter((g) => g.student_id === s.id)
+          let totalWeighted = 0
+          let totalCoef = 0
+
+          subjects.forEach((subject) => {
+            const grade = sGrades.find((g) => g.subject_id === subject.id)
+            if (grade) {
+              totalWeighted += grade.score * subject.coefficient
+              totalCoef += subject.coefficient
+            }
+          })
+
+          return { studentId: s.id, average: totalCoef > 0 ? totalWeighted / totalCoef : 0 }
+        })
+
+        // Sort and find rank
+        studentAverages.sort((a, b) => b.average - a.average)
+        let rank = 1
+        for (let i = 0; i < studentAverages.length; i++) {
+          if (i > 0 && studentAverages[i].average < studentAverages[i - 1].average) {
+            rank = i + 1
+          }
+          if (studentAverages[i].studentId === studentId) break
+        }
+
+        const thisStudentData = studentAverages.find((s) => s.studentId === studentId)
+        const average = thisStudentData ? Math.round(thisStudentData.average * 100) / 100 : 0
+
+        const classAverage =
+          studentAverages.length > 0
+            ? Math.round((studentAverages.reduce((sum, s) => sum + s.average, 0) / studentAverages.length) * 100) / 100
+            : 0
+
+        setBulletinData({
+          student,
+          class: student.class,
+          period,
+          subjects,
+          grades,
+          groupAverages,
+          average,
+          rank,
+          classSize: (classStudents || []).length,
+          classAverage,
+        })
+
+        setShowBulletin(true)
+      } catch (error) {
+        console.error("Error generating bulletin:", error)
+        toast.error("Erreur lors de la génération du bulletin")
+      } finally {
+        setGenerating(false)
+      }
+    },
+    [supabase, selectedPeriod],
+  )
 
   const handleDownloadPDF = async () => {
     if (!bulletinData) return
@@ -285,16 +332,14 @@ export default function BulletinsPage() {
       await generatePDF("bulletin-document", filename, "portrait")
       toast.success("PDF téléchargé avec succès")
     } catch (error) {
-      console.error("[v0] Error downloading PDF:", error)
+      console.error("Error downloading PDF:", error)
       toast.error("Erreur lors du téléchargement")
     } finally {
       setDownloading(false)
     }
   }
 
-  const handlePrint = () => {
-    window.print()
-  }
+  const handlePrint = () => window.print()
 
   const filteredPeriods = periods.filter((p) => p.type === bulletinType)
 
@@ -318,7 +363,6 @@ export default function BulletinsPage() {
         )}
       </PageHeader>
 
-      {/* Selection Form */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-lg">Paramètres du Bulletin</CardTitle>
@@ -393,7 +437,6 @@ export default function BulletinsPage() {
         </CardContent>
       </Card>
 
-      {/* Students List */}
       <Card className="mb-6">
         <CardHeader>
           <CardTitle className="text-lg">Sélectionner un élève ({filteredStudents.length} résultats)</CardTitle>
@@ -444,7 +487,6 @@ export default function BulletinsPage() {
         </CardContent>
       </Card>
 
-      {/* Bulletin Preview Dialog */}
       <Dialog open={showBulletin} onOpenChange={setShowBulletin}>
         <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
           <DialogHeader>

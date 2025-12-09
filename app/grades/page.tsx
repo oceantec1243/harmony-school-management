@@ -1,333 +1,395 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { AppLayout } from "@/components/layout/app-layout"
-import { PageHeader } from "@/components/ui/page-header"
+import { createBrowserClient } from "@supabase/ssr"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
-import { StudentAvatar } from "@/components/students/student-avatar"
-import { Save, AlertCircle, CheckCircle, Loader2 } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Badge } from "@/components/ui/badge"
+import { Progress } from "@/components/ui/progress"
+import { AppLayout } from "@/components/layout/app-layout"
+import { PageHeader } from "@/components/ui/page-header"
+import { Save, BookOpen, Users, CheckCircle2, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
-import { createClient } from "@/lib/supabase/client"
-import { cn } from "@/lib/utils"
 
-type Student = {
-  id: string
-  matricule: string
-  first_name: string
-  last_name: string
-  class_id: string
-  class?: { name: string }
-}
-
-type ClassSubject = {
-  id: string
-  subject_id: string
-  coefficient: number
-  subject: {
-    id: string
-    name: string
-    code: string
-    subject_group: { id: string; name: string }
-  }
-  teacher?: { first_name: string; last_name: string } | null
-}
-
-type AcademicPeriod = {
+interface Section {
   id: string
   name: string
-  type: string
-  number: number
-  academic_year: string
 }
 
-type Section = { id: string; name: string }
-type Level = { id: string; name: string; section_id: string }
-type ClassType = { id: string; name: string; level_id: string; section_id: string }
+interface Level {
+  id: string
+  name: string
+  section_id: string
+}
+
+interface Class {
+  id: string
+  name: string
+  level_id: string
+  section_id: string
+  level?: Level
+}
+
+interface Subject {
+  id: string
+  name: string
+  code: string
+  subject_group?: {
+    id: string
+    name: string
+  }
+}
+
+interface CombinedSubject {
+  id: string
+  subject_id: string
+  subject: Subject
+  coefficient: number
+  source: "class" | "level"
+}
+
+interface Student {
+  id: string
+  first_name: string
+  last_name: string
+  matricule: string
+}
+
+interface Sequence {
+  id: string
+  name: string
+  number: number
+}
+
+interface Grade {
+  id: string
+  student_id: string
+  subject_id: string
+  period_id: string
+  score: number
+}
+
+type SubjectTypeFilter = "all" | "tronc_commun" | "specialite"
 
 export default function GradesPage() {
-  const [mode, setMode] = useState<"class" | "level">("class")
-  const [selectedClass, setSelectedClass] = useState<string>("")
-  const [selectedLevel, setSelectedLevel] = useState<string>("")
-  const [selectedSection, setSelectedSection] = useState<string>("")
-  const [selectedSubject, setSelectedSubject] = useState<string>("")
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("")
-  const [grades, setGrades] = useState<Record<string, string>>({})
-  const [isSaving, setIsSaving] = useState(false)
-  const [loading, setLoading] = useState(true)
-
   const [sections, setSections] = useState<Section[]>([])
   const [levels, setLevels] = useState<Level[]>([])
-  const [classes, setClasses] = useState<ClassType[]>([])
-  const [classSubjects, setClassSubjects] = useState<ClassSubject[]>([])
-  const [periods, setPeriods] = useState<AcademicPeriod[]>([])
-  const [students, setStudents] = useState<Student[]>([])
+  const [classes, setClasses] = useState<Class[]>([])
+  const [sequences, setSequences] = useState<Sequence[]>([])
 
-  const supabase = createClient()
+  const [selectedSection, setSelectedSection] = useState<string>("")
+  const [selectedLevel, setSelectedLevel] = useState<string>("")
+  const [selectedClass, setSelectedClass] = useState<string>("")
+  const [selectedSequences, setSelectedSequences] = useState<string[]>([])
+  const [subjectTypeFilter, setSubjectTypeFilter] = useState<SubjectTypeFilter>("all")
+
+  const [students, setStudents] = useState<Student[]>([])
+  const [combinedSubjects, setCombinedSubjects] = useState<CombinedSubject[]>([])
+  const [selectedSubject, setSelectedSubject] = useState<string>("")
+
+  const [grades, setGrades] = useState<Record<string, Record<string, Record<string, number | null>>>>({})
+  const [saving, setSaving] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  )
 
   // Fetch initial data
   useEffect(() => {
-    async function fetchInitialData() {
-      setLoading(true)
-      try {
-        const [sectionsRes, levelsRes, classesRes, periodsRes] = await Promise.all([
-          supabase.from("sections").select("*").order("name"),
-          supabase.from("levels").select("*").order("order"),
-          supabase.from("classes").select("*").order("name"),
-          supabase.from("academic_periods").select("*").eq("type", "sequence").order("number"),
-        ])
+    const fetchData = async () => {
+      const [sectionsRes, sequencesRes] = await Promise.all([
+        supabase.from("sections").select("*").order("name"),
+        supabase.from("academic_periods").select("*").eq("type", "sequence").order("number"),
+      ])
 
-        setSections(sectionsRes.data || [])
-        setLevels(levelsRes.data || [])
-        setClasses(classesRes.data || [])
-        setPeriods(periodsRes.data || [])
-
-        // Set default period
-        if (periodsRes.data && periodsRes.data.length > 0) {
-          setSelectedPeriod(periodsRes.data[0].id)
-        }
-      } catch (error) {
-        console.error("[v0] Error fetching initial data:", error)
-        toast.error("Erreur lors du chargement des données")
-      } finally {
-        setLoading(false)
-      }
+      if (sectionsRes.data) setSections(sectionsRes.data)
+      if (sequencesRes.data) setSequences(sequencesRes.data)
     }
-    fetchInitialData()
+    fetchData()
   }, [supabase])
 
-  // Fetch class subjects when class is selected
+  // Fetch levels when section changes
+  useEffect(() => {
+    if (selectedSection) {
+      const fetchLevels = async () => {
+        const { data } = await supabase.from("levels").select("*").eq("section_id", selectedSection).order("order")
+        if (data) setLevels(data)
+      }
+      fetchLevels()
+      setSelectedLevel("")
+      setSelectedClass("")
+      setClasses([])
+    }
+  }, [selectedSection, supabase])
+
+  // Fetch classes when level changes
+  useEffect(() => {
+    if (selectedLevel) {
+      const fetchClasses = async () => {
+        const { data } = await supabase.from("classes").select("*, level:levels(*)").eq("level_id", selectedLevel)
+        if (data) setClasses(data)
+      }
+      fetchClasses()
+      setSelectedClass("")
+    }
+  }, [selectedLevel, supabase])
+
   const fetchClassSubjects = useCallback(
     async (classId: string) => {
-      try {
-        const { data, error } = await supabase
-          .from("class_subjects")
-          .select(`
-          *,
-          subject:subjects(
-            id,
-            name,
-            code,
-            subject_group:subject_groups(id, name)
-          ),
-          teacher:teachers(first_name, last_name)
-        `)
-          .eq("class_id", classId)
-          .order("coefficient", { ascending: false })
+      const classData = classes.find((c) => c.id === classId)
+      if (!classData) return
 
-        if (error) throw error
-        setClassSubjects(data || [])
-      } catch (error) {
-        console.error("[v0] Error fetching class subjects:", error)
-      }
-    },
-    [supabase],
-  )
+      const levelId = classData.level_id
 
-  // Fetch students when selection changes
-  const fetchStudents = useCallback(async () => {
-    if (mode === "class" && selectedClass) {
-      const { data } = await supabase
-        .from("students")
-        .select("id, matricule, first_name, last_name, class_id")
-        .eq("class_id", selectedClass)
-        .eq("status", "Active")
-        .order("last_name")
-      setStudents(data || [])
-    } else if (mode === "level" && selectedLevel && selectedSection) {
-      const levelClasses = classes.filter((c) => c.level_id === selectedLevel && c.section_id === selectedSection)
-      const classIds = levelClasses.map((c) => c.id)
-      if (classIds.length > 0) {
-        const { data } = await supabase
-          .from("students")
-          .select(`
-            id, matricule, first_name, last_name, class_id,
-            class:classes(name)
-          `)
-          .in("class_id", classIds)
-          .eq("status", "Active")
-          .order("last_name")
-        setStudents(data || [])
-      }
-    } else {
-      setStudents([])
-    }
-  }, [supabase, mode, selectedClass, selectedLevel, selectedSection, classes])
+      // Fetch class subjects (specialites)
+      const classSubjectsRes = await supabase
+        .from("class_subjects")
+        .select("*, subject:subjects(*, subject_group:subject_groups(*))")
+        .eq("class_id", classId)
 
-  // Fetch existing grades
-  const fetchExistingGrades = useCallback(async () => {
-    if (!selectedSubject || !selectedPeriod || students.length === 0) return
+      // Fetch level subjects (tronc commun)
+      const levelSubjectsRes = await supabase
+        .from("level_subjects")
+        .select("*, subject:subjects(*, subject_group:subject_groups(*))")
+        .eq("level_id", levelId)
 
-    const studentIds = students.map((s) => s.id)
-    const { data } = await supabase
-      .from("grades")
-      .select("student_id, score")
-      .in("student_id", studentIds)
-      .eq("subject_id", selectedSubject)
-      .eq("academic_period_id", selectedPeriod)
+      const classSubjects: CombinedSubject[] = (classSubjectsRes.data || []).map((cs: any) => ({
+        id: cs.id,
+        subject_id: cs.subject_id,
+        subject: cs.subject,
+        coefficient: cs.coefficient || 1,
+        source: "class" as const, // Spécialité
+      }))
 
-    const gradesMap: Record<string, string> = {}
-    data?.forEach((g) => {
-      gradesMap[g.student_id] = g.score.toString()
-    })
-    setGrades(gradesMap)
-  }, [supabase, selectedSubject, selectedPeriod, students])
+      const levelSubjects: CombinedSubject[] = (levelSubjectsRes.data || []).map((ls: any) => ({
+        id: ls.id,
+        subject_id: ls.subject_id,
+        subject: ls.subject,
+        coefficient: ls.coefficient || 1,
+        source: "level" as const, // Tronc commun
+      }))
 
-  useEffect(() => {
-    if (selectedClass) {
-      fetchClassSubjects(selectedClass)
-      fetchStudents()
-    }
-  }, [selectedClass, fetchClassSubjects, fetchStudents])
+      // Combine: level subjects first (tronc commun), then class subjects (specialites)
+      // Class subjects override if same subject exists
+      const subjectMap = new Map<string, CombinedSubject>()
 
-  useEffect(() => {
-    if (mode === "level" && selectedLevel && selectedSection) {
-      // For level mode, get subjects from the first class
-      const levelClasses = classes.filter((c) => c.level_id === selectedLevel && c.section_id === selectedSection)
-      if (levelClasses.length > 0) {
-        fetchClassSubjects(levelClasses[0].id)
-      }
-      fetchStudents()
-    }
-  }, [mode, selectedLevel, selectedSection, classes, fetchClassSubjects, fetchStudents])
-
-  useEffect(() => {
-    fetchExistingGrades()
-  }, [fetchExistingGrades])
-
-  const handleGradeChange = (studentId: string, value: string) => {
-    const num = Number.parseFloat(value)
-    if (value === "" || (num >= 0 && num <= 20)) {
-      setGrades((prev) => ({ ...prev, [studentId]: value }))
-    }
-  }
-
-  const handleSave = async () => {
-    if (!selectedSubject || !selectedPeriod) {
-      toast.error("Veuillez sélectionner une matière et une période")
-      return
-    }
-
-    setIsSaving(true)
-    try {
-      const classSubject = classSubjects.find((cs) => cs.subject_id === selectedSubject)
-      const coefficient = classSubject?.coefficient || 1
-
-      const gradesToSave = Object.entries(grades)
-        .filter(([, score]) => score !== "")
-        .map(([studentId, score]) => ({
-          student_id: studentId,
-          subject_id: selectedSubject,
-          academic_period_id: selectedPeriod,
-          score: Number.parseFloat(score),
-          coefficient,
-          class_subject_id: classSubject?.id,
-        }))
-
-      if (gradesToSave.length === 0) {
-        toast.error("Aucune note à enregistrer")
-        return
-      }
-
-      const { error } = await supabase.from("grades").upsert(gradesToSave, {
-        onConflict: "student_id,subject_id,academic_period_id",
+      levelSubjects.forEach((ls) => {
+        subjectMap.set(ls.subject_id, ls)
       })
 
-      if (error) throw error
+      classSubjects.forEach((cs) => {
+        subjectMap.set(cs.subject_id, cs)
+      })
 
-      toast.success(`${gradesToSave.length} notes enregistrées avec succès!`)
+      const combined = Array.from(subjectMap.values())
+      console.log(
+        `[v0] Combined subjects loaded: ${combined.length} class: ${classSubjects.length} level: ${levelSubjects.length}`,
+      )
+      setCombinedSubjects(combined)
+    },
+    [classes, supabase],
+  )
+
+  // Fetch students when class changes
+  useEffect(() => {
+    if (selectedClass) {
+      const fetchStudents = async () => {
+        const { data } = await supabase
+          .from("students")
+          .select("*")
+          .eq("class_id", selectedClass)
+          .ilike("status", "active")
+          .order("last_name")
+        if (data) setStudents(data)
+      }
+      fetchStudents()
+      fetchClassSubjects(selectedClass)
+    }
+  }, [selectedClass, supabase, fetchClassSubjects])
+
+  // Fetch existing grades when subject or sequences change
+  useEffect(() => {
+    if (selectedSubject && selectedSequences.length > 0 && students.length > 0) {
+      const fetchGrades = async () => {
+        const { data } = await supabase
+          .from("grades")
+          .select("*")
+          .eq("subject_id", selectedSubject)
+          .in("period_id", selectedSequences)
+          .in(
+            "student_id",
+            students.map((s) => s.id),
+          )
+
+        const gradesMap: Record<string, Record<string, Record<string, number | null>>> = {}
+
+        students.forEach((student) => {
+          gradesMap[student.id] = {}
+          selectedSequences.forEach((seq) => {
+            gradesMap[student.id][seq] = {}
+            gradesMap[student.id][seq][selectedSubject] = null
+          })
+        })
+
+        data?.forEach((grade: Grade) => {
+          if (gradesMap[grade.student_id] && gradesMap[grade.student_id][grade.period_id]) {
+            gradesMap[grade.student_id][grade.period_id][grade.subject_id] = grade.score
+          }
+        })
+
+        setGrades(gradesMap)
+      }
+      fetchGrades()
+    }
+  }, [selectedSubject, selectedSequences, students, supabase])
+
+  const handleGradeChange = (studentId: string, sequenceId: string, value: string) => {
+    const numValue = value === "" ? null : Math.min(20, Math.max(0, Number.parseFloat(value) || 0))
+    setGrades((prev) => ({
+      ...prev,
+      [studentId]: {
+        ...prev[studentId],
+        [sequenceId]: {
+          ...prev[studentId]?.[sequenceId],
+          [selectedSubject]: numValue,
+        },
+      },
+    }))
+  }
+
+  const calculateAverage = (studentId: string): number | null => {
+    if (!grades[studentId] || selectedSequences.length === 0) return null
+
+    let total = 0
+    let count = 0
+
+    selectedSequences.forEach((seq) => {
+      const grade = grades[studentId]?.[seq]?.[selectedSubject]
+      if (grade !== null && grade !== undefined) {
+        total += grade
+        count++
+      }
+    })
+
+    return count > 0 ? Math.round((total / count) * 100) / 100 : null
+  }
+
+  const handleSaveGrades = async () => {
+    if (!selectedSubject || selectedSequences.length === 0) return
+
+    setSaving(true)
+    try {
+      const gradesToSave: { student_id: string; subject_id: string; period_id: string; score: number }[] = []
+
+      Object.entries(grades).forEach(([studentId, sequences]) => {
+        Object.entries(sequences).forEach(([sequenceId, subjects]) => {
+          const score = subjects[selectedSubject]
+          if (score !== null && score !== undefined) {
+            gradesToSave.push({
+              student_id: studentId,
+              subject_id: selectedSubject,
+              period_id: sequenceId,
+              score,
+            })
+          }
+        })
+      })
+
+      let savedCount = 0
+      for (const grade of gradesToSave) {
+        await supabase.from("grades").upsert(grade, {
+          onConflict: "student_id,subject_id,period_id",
+        })
+        savedCount++
+        setProgress(Math.round((savedCount / gradesToSave.length) * 100))
+      }
+
+      toast.success(`${savedCount} notes enregistrées avec succès`)
     } catch (error) {
-      console.error("[v0] Error saving grades:", error)
+      console.error("Error saving grades:", error)
       toast.error("Erreur lors de l'enregistrement des notes")
     } finally {
-      setIsSaving(false)
+      setSaving(false)
+      setProgress(0)
     }
   }
 
-  const gradedCount = Object.values(grades).filter((g) => g !== "").length
-  const totalStudents = students.length
-  const progress = totalStudents > 0 ? (gradedCount / totalStudents) * 100 : 0
+  const filteredLevels = levels.filter((l) => l.section_id === selectedSection)
+  const filteredClasses = classes.filter((c) => c.level_id === selectedLevel)
+  const selectedSequencesList = sequences.filter((s) => selectedSequences.includes(s.id))
 
-  const filteredLevels = selectedSection ? levels.filter((l) => l.section_id === selectedSection) : levels
-  const filteredClasses = classes.filter((c) => {
-    if (selectedSection && c.section_id !== selectedSection) return false
-    if (selectedLevel && c.level_id !== selectedLevel) return false
+  const filteredSubjects = combinedSubjects.filter((cs) => {
+    if (subjectTypeFilter === "all") return true
+    if (subjectTypeFilter === "tronc_commun") return cs.source === "level"
+    if (subjectTypeFilter === "specialite") return cs.source === "class"
     return true
   })
 
-  if (loading) {
-    return (
-      <AppLayout>
-        <PageHeader title="Saisie des Notes" description="Chargement..." />
-        <div className="space-y-4">
-          <Skeleton className="h-12 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      </AppLayout>
-    )
-  }
+  // Count subjects by type
+  const troncCommunCount = combinedSubjects.filter((cs) => cs.source === "level").length
+  const specialiteCount = combinedSubjects.filter((cs) => cs.source === "class").length
 
   return (
     <AppLayout>
-      <PageHeader title="Saisie des Notes" description="Entrez les notes des élèves par classe ou par niveau">
-        {students.length > 0 && selectedSubject && (
-          <Button onClick={handleSave} disabled={isSaving}>
-            {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-            {isSaving ? "Enregistrement..." : "Enregistrer"}
-          </Button>
-        )}
-      </PageHeader>
+      <div className="space-y-6">
+        <PageHeader title="Saisie des Notes" description="Saisissez les notes des élèves par classe et par matière" />
 
-      {/* Mode Selection */}
-      <Tabs
-        value={mode}
-        onValueChange={(v) => {
-          setMode(v as "class" | "level")
-          setSelectedClass("")
-          setSelectedLevel("")
-          setSelectedSection("")
-          setSelectedSubject("")
-          setGrades({})
-          setStudents([])
-        }}
-        className="mb-6"
-      >
-        <TabsList>
-          <TabsTrigger value="class">Par Classe</TabsTrigger>
-          <TabsTrigger value="level">Par Niveau</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
-      {/* Selection Form */}
-      <Card className="mb-6">
-        <CardHeader>
-          <CardTitle className="text-lg">Sélection</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {mode === "class" ? (
+        {/* Filters */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <BookOpen className="h-5 w-5" />
+              Sélection
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="space-y-2">
-                <Label>Classe</Label>
-                <Select
-                  value={selectedClass}
-                  onValueChange={(v) => {
-                    setSelectedClass(v)
-                    setSelectedSubject("")
-                    setGrades({})
-                  }}
-                >
+                <Label>Section</Label>
+                <Select value={selectedSection} onValueChange={setSelectedSection}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner une classe" />
+                    <SelectValue placeholder="Choisir une section" />
                   </SelectTrigger>
                   <SelectContent>
-                    {classes.map((cls) => (
+                    {sections.map((section) => (
+                      <SelectItem key={section.id} value={section.id}>
+                        {section.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Niveau</Label>
+                <Select value={selectedLevel} onValueChange={setSelectedLevel} disabled={!selectedSection}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir un niveau" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredLevels.map((level) => (
+                      <SelectItem key={level.id} value={level.id}>
+                        {level.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Classe</Label>
+                <Select value={selectedClass} onValueChange={setSelectedClass} disabled={!selectedLevel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir une classe" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredClasses.map((cls) => (
                       <SelectItem key={cls.id} value={cls.id}>
                         {cls.name}
                       </SelectItem>
@@ -335,203 +397,230 @@ export default function GradesPage() {
                   </SelectContent>
                 </Select>
               </div>
-            ) : (
-              <>
-                <div className="space-y-2">
-                  <Label>Section</Label>
-                  <Select
-                    value={selectedSection}
-                    onValueChange={(v) => {
-                      setSelectedSection(v)
-                      setSelectedLevel("")
-                      setSelectedSubject("")
-                      setGrades({})
-                    }}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner une section" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {sections.map((section) => (
-                        <SelectItem key={section.id} value={section.id}>
-                          {section.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Niveau</Label>
-                  <Select
-                    value={selectedLevel}
-                    onValueChange={(v) => {
-                      setSelectedLevel(v)
-                      setSelectedSubject("")
-                      setGrades({})
-                    }}
-                    disabled={!selectedSection}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Sélectionner un niveau" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filteredLevels.map((level) => (
-                        <SelectItem key={level.id} value={level.id}>
-                          {level.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </>
+
+              <div className="space-y-2">
+                <Label>Type de matière</Label>
+                <Select
+                  value={subjectTypeFilter}
+                  onValueChange={(v) => {
+                    setSubjectTypeFilter(v as SubjectTypeFilter)
+                    setSelectedSubject("")
+                  }}
+                  disabled={!selectedClass}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Toutes les matières" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Toutes ({combinedSubjects.length})</SelectItem>
+                    <SelectItem value="tronc_commun">Tronc Commun ({troncCommunCount})</SelectItem>
+                    <SelectItem value="specialite">Spécialités ({specialiteCount})</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Subject Selection */}
+            {selectedClass && filteredSubjects.length > 0 && (
+              <div className="space-y-2">
+                <Label>Matière</Label>
+                <Select value={selectedSubject} onValueChange={setSelectedSubject}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choisir une matière" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredSubjects.map((cs) => (
+                      <SelectItem key={cs.subject_id} value={cs.subject_id}>
+                        <div className="flex items-center gap-2">
+                          <span>{cs.subject?.name}</span>
+                          <Badge variant={cs.source === "level" ? "secondary" : "default"} className="text-xs">
+                            {cs.source === "level" ? "TC" : "SP"}
+                          </Badge>
+                          <span className="text-muted-foreground text-xs">(Coef: {cs.coefficient})</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
 
-            <div className="space-y-2">
-              <Label>Matière</Label>
-              <Select
-                value={selectedSubject}
-                onValueChange={(v) => {
-                  setSelectedSubject(v)
-                  setGrades({})
-                }}
-                disabled={classSubjects.length === 0}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Sélectionner une matière" />
-                </SelectTrigger>
-                <SelectContent>
-                  {classSubjects.map((cs) => (
-                    <SelectItem key={cs.id} value={cs.subject_id}>
-                      {cs.subject?.name} (Coef. {cs.coefficient})
-                      {cs.teacher && ` - ${cs.teacher.first_name} ${cs.teacher.last_name}`}
-                    </SelectItem>
+            {/* Sequence Selection */}
+            {selectedSubject && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label>Séquences à remplir</Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      if (selectedSequences.length === sequences.length) {
+                        setSelectedSequences([])
+                      } else {
+                        setSelectedSequences(sequences.map((s) => s.id))
+                      }
+                    }}
+                  >
+                    {selectedSequences.length === sequences.length ? "Tout désélectionner" : "Tout sélectionner"}
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {sequences.map((seq) => (
+                    <div key={seq.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={seq.id}
+                        checked={selectedSequences.includes(seq.id)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedSequences([...selectedSequences, seq.id])
+                          } else {
+                            setSelectedSequences(selectedSequences.filter((id) => id !== seq.id))
+                          }
+                        }}
+                      />
+                      <label htmlFor={seq.id} className="text-sm cursor-pointer">
+                        {seq.name}
+                      </label>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Période</Label>
-              <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Sélectionner une période" />
-                </SelectTrigger>
-                <SelectContent>
-                  {periods.map((period) => (
-                    <SelectItem key={period.id} value={period.id}>
-                      {period.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Progress */}
-      {students.length > 0 && selectedSubject && (
-        <Card className="mb-6">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                {progress === 100 ? (
-                  <CheckCircle className="h-5 w-5 text-success" />
-                ) : (
-                  <AlertCircle className="h-5 w-5 text-warning" />
-                )}
-                <span className="font-medium">Progression</span>
+                </div>
               </div>
-              <Badge variant={progress === 100 ? "default" : "secondary"}>
-                {gradedCount} / {totalStudents} notes saisies
-              </Badge>
-            </div>
-            <div className="w-full bg-muted rounded-full h-2">
-              <div
-                className={cn(
-                  "h-2 rounded-full transition-all duration-300",
-                  progress === 100 ? "bg-success" : "bg-primary",
-                )}
-                style={{ width: `${progress}%` }}
-              />
-            </div>
+            )}
           </CardContent>
         </Card>
-      )}
 
-      {/* Grades Table */}
-      {students.length > 0 && selectedSubject ? (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">
-              Saisie des Notes - {classSubjects.find((cs) => cs.subject_id === selectedSubject)?.subject?.name}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="w-12">N°</TableHead>
-                    <TableHead>Élève</TableHead>
-                    <TableHead>Matricule</TableHead>
-                    {mode === "level" && <TableHead>Classe</TableHead>}
-                    <TableHead className="w-32 text-center">Note /20</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {students.map((student, index) => {
-                    const gradeValue = grades[student.id] || ""
-                    const numGrade = Number.parseFloat(gradeValue)
-                    const isValid = gradeValue === "" || (numGrade >= 0 && numGrade <= 20)
-
-                    return (
-                      <TableRow key={student.id} className="hover:bg-muted/30">
-                        <TableCell className="font-medium text-muted-foreground">{index + 1}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <StudentAvatar firstName={student.first_name} lastName={student.last_name} size="sm" />
-                            <span className="font-medium">
-                              {student.last_name} {student.first_name}
-                            </span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono text-sm text-muted-foreground">{student.matricule}</TableCell>
-                        {mode === "level" && <TableCell>{(student as any).class?.name}</TableCell>}
-                        <TableCell>
-                          <Input
-                            type="number"
-                            min="0"
-                            max="20"
-                            step="0.25"
-                            value={gradeValue}
-                            onChange={(e) => handleGradeChange(student.id, e.target.value)}
-                            className={cn(
-                              "w-24 text-center mx-auto",
-                              !isValid && "border-destructive focus-visible:ring-destructive",
+        {/* Grades Table */}
+        {selectedSubject && selectedSequences.length > 0 && students.length > 0 && (
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Notes - {combinedSubjects.find((s) => s.subject_id === selectedSubject)?.subject?.name}
+                  <Badge
+                    variant={
+                      combinedSubjects.find((s) => s.subject_id === selectedSubject)?.source === "level"
+                        ? "secondary"
+                        : "default"
+                    }
+                  >
+                    {combinedSubjects.find((s) => s.subject_id === selectedSubject)?.source === "level"
+                      ? "Tronc Commun"
+                      : "Spécialité"}
+                  </Badge>
+                </CardTitle>
+                <Button onClick={handleSaveGrades} disabled={saving}>
+                  {saving ? (
+                    <>
+                      <Progress value={progress} className="w-20 mr-2" />
+                      {progress}%
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Enregistrer
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="bg-muted/50">
+                      <th className="border p-2 text-left">#</th>
+                      <th className="border p-2 text-left">Matricule</th>
+                      <th className="border p-2 text-left">Nom & Prénom</th>
+                      {selectedSequencesList.map((seq) => (
+                        <th key={seq.id} className="border p-2 text-center min-w-[100px]">
+                          {seq.name}
+                        </th>
+                      ))}
+                      <th className="border p-2 text-center bg-primary/10">Moyenne Séq.</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((student, index) => {
+                      const avg = calculateAverage(student.id)
+                      return (
+                        <tr key={student.id} className="hover:bg-muted/30">
+                          <td className="border p-2 text-center text-muted-foreground">{index + 1}</td>
+                          <td className="border p-2 text-sm">{student.matricule}</td>
+                          <td className="border p-2 font-medium">
+                            {student.last_name} {student.first_name}
+                          </td>
+                          {selectedSequencesList.map((seq) => (
+                            <td key={seq.id} className="border p-1 text-center">
+                              <Input
+                                type="number"
+                                min="0"
+                                max="20"
+                                step="0.25"
+                                value={grades[student.id]?.[seq.id]?.[selectedSubject] ?? ""}
+                                onChange={(e) => handleGradeChange(student.id, seq.id, e.target.value)}
+                                className={`w-20 mx-auto text-center ${
+                                  (grades[student.id]?.[seq.id]?.[selectedSubject] ?? 0) < 10
+                                    ? "text-red-600"
+                                    : "text-green-600"
+                                }`}
+                              />
+                            </td>
+                          ))}
+                          <td className="border p-2 text-center font-bold bg-primary/5">
+                            {avg !== null ? (
+                              <span className={avg < 10 ? "text-red-600" : "text-green-600"}>{avg.toFixed(2)}</span>
+                            ) : (
+                              "-"
                             )}
-                            placeholder="-"
-                          />
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="py-12">
-            <div className="text-center text-muted-foreground">
-              <AlertCircle className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-lg font-medium">Sélectionnez une classe et une matière</p>
-              <p className="text-sm">pour commencer la saisie des notes</p>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Summary */}
+              <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
+                <div className="flex items-center gap-1">
+                  <CheckCircle2 className="h-4 w-4 text-green-600" />
+                  <span>
+                    {
+                      Object.values(grades).filter((seqs) =>
+                        Object.values(seqs).some((subj) => subj[selectedSubject] !== null),
+                      ).length
+                    }{" "}
+                    / {students.length} élèves avec notes
+                  </span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <span>
+                    {
+                      Object.values(grades).filter((seqs) =>
+                        Object.values(seqs).every((subj) => subj[selectedSubject] === null),
+                      ).length
+                    }{" "}
+                    élèves sans notes
+                  </span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* No students message */}
+        {selectedClass && students.length === 0 && (
+          <Card>
+            <CardContent className="py-8 text-center text-muted-foreground">
+              <Users className="h-12 w-12 mx-auto mb-4 opacity-50" />
+              <p>Aucun élève trouvé dans cette classe.</p>
+              <p className="text-sm">Veuillez d'abord ajouter des élèves à cette classe.</p>
+            </CardContent>
+          </Card>
+        )}
+      </div>
     </AppLayout>
   )
 }

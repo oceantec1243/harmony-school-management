@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { PageHeader } from "@/components/ui/page-header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Download, FileText, Printer, Loader2 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { createBrowserClient } from "@supabase/ssr"
 import { toast } from "sonner"
 import { BordereauDocument } from "@/components/reports/bordereau-document"
 import { generatePDF } from "@/lib/services/pdf-service"
@@ -18,26 +18,7 @@ import { generatePDF } from "@/lib/services/pdf-service"
 type Section = { id: string; name: string }
 type Level = { id: string; name: string; section_id: string }
 type ClassType = { id: string; name: string; level_id: string; section_id: string; class_teacher: string | null }
-type AcademicPeriod = {
-  id: string
-  name: string
-  type: string
-  number: number
-  academic_year: string
-  parent_id: string | null
-}
-
-type StudentReport = {
-  student: {
-    id: string
-    matricule: string
-    first_name: string
-    last_name: string
-  }
-  grades: Record<string, number>
-  average: number
-  rank: number
-}
+type AcademicPeriod = { id: string; name: string; type: string; number: number; academic_year: string }
 
 type Subject = {
   id: string
@@ -46,11 +27,17 @@ type Subject = {
   code: string
   coefficient: number
   group_name: string
-  group_order: number
+}
+
+type StudentReport = {
+  student: { id: string; matricule: string; first_name: string; last_name: string }
+  grades: Record<string, number>
+  average: number
+  rank: number
 }
 
 type ReportData = {
-  class: ClassType & { level?: { name: string }; section?: { name: string } }
+  class: ClassType & { level?: { id: string; name: string }; section?: { name: string } }
   period: AcademicPeriod
   subjects: Subject[]
   students: StudentReport[]
@@ -60,10 +47,10 @@ type ReportData = {
 
 export default function BordereauxPage() {
   const [mode, setMode] = useState<"class" | "level">("class")
-  const [selectedClass, setSelectedClass] = useState<string>("")
-  const [selectedLevel, setSelectedLevel] = useState<string>("")
-  const [selectedSection, setSelectedSection] = useState<string>("")
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("")
+  const [selectedClass, setSelectedClass] = useState("")
+  const [selectedLevel, setSelectedLevel] = useState("")
+  const [selectedSection, setSelectedSection] = useState("")
+  const [selectedPeriod, setSelectedPeriod] = useState("")
   const [showReport, setShowReport] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -77,9 +64,12 @@ export default function BordereauxPage() {
   const [schoolSettings, setSchoolSettings] = useState<any>(null)
 
   const reportRef = useRef<HTMLDivElement>(null)
-  const supabase = createClient()
 
-  // Fetch initial data
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  )
+
   useEffect(() => {
     async function fetchInitialData() {
       setLoading(true)
@@ -89,7 +79,7 @@ export default function BordereauxPage() {
           supabase.from("levels").select("*").order("order"),
           supabase.from("classes").select("*").order("name"),
           supabase.from("academic_periods").select("*").order("number"),
-          supabase.from("school_settings").select("*").maybeSingle(),
+          supabase.from("school_settings").select("*").limit(1),
         ])
 
         setSections(sectionsRes.data || [])
@@ -97,97 +87,164 @@ export default function BordereauxPage() {
         setClasses(classesRes.data || [])
         setPeriods(periodsRes.data || [])
         setSchoolSettings(
-          settingsRes.data || {
+          settingsRes.data?.[0] || {
             school_name: "HARMONY School",
-            school_slogan: "L'harmonie entre technologie et éducation",
+            school_slogan: "L'excellence au service de l'éducation",
             current_academic_year: "2024-2025",
           },
         )
       } catch (error) {
-        console.error("[v0] Error fetching initial data:", error)
+        console.error("Error fetching initial data:", error)
       } finally {
         setLoading(false)
       }
     }
     fetchInitialData()
-  }, [supabase])
+  }, [])
 
-  const generateReport = async () => {
+  const generateReport = useCallback(async () => {
     setGenerating(true)
+    setShowReport(false)
+
     try {
       let classId = selectedClass
       let classData: any = null
 
+      // Get class data
       if (mode === "class" && selectedClass) {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("classes")
-          .select(`*, level:levels(name), section:sections(name)`)
+          .select("id, name, level_id, section_id, class_teacher, level:levels(id, name), section:sections(name)")
           .eq("id", selectedClass)
           .single()
+
+        if (error) throw error
         classData = data
       } else if (mode === "level" && selectedLevel && selectedSection) {
-        const { data: cls } = await supabase
+        const { data, error } = await supabase
           .from("classes")
-          .select(`*, level:levels(name), section:sections(name)`)
+          .select("id, name, level_id, section_id, class_teacher, level:levels(id, name), section:sections(name)")
           .eq("level_id", selectedLevel)
           .eq("section_id", selectedSection)
           .limit(1)
-          .single()
-        classId = cls?.id
-        classData = cls
+
+        if (error) throw error
+        classData = data?.[0]
+        classId = classData?.id
       }
 
       if (!classId || !classData) {
         toast.error("Classe non trouvée")
+        setGenerating(false)
         return
       }
 
-      // Get period
-      const { data: period } = await supabase.from("academic_periods").select("*").eq("id", selectedPeriod).single()
+      const levelId = classData.level_id
+      const sectionId = classData.section_id
 
-      // Get class subjects
-      const { data: classSubjects } = await supabase
+      // Get period
+      const { data: period, error: periodError } = await supabase
+        .from("academic_periods")
+        .select("*")
+        .eq("id", selectedPeriod)
+        .single()
+
+      if (periodError) throw periodError
+
+      // Fetch class subjects - simple query without ordering
+      const { data: classSubjectsData, error: csError } = await supabase
         .from("class_subjects")
-        .select(`
-          id, subject_id, coefficient,
-          subject:subjects(id, name, code, subject_group:subject_groups(name, order))
-        `)
+        .select("id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))")
         .eq("class_id", classId)
 
-      const subjects: Subject[] = (classSubjects || [])
-        .filter((cs) => cs.subject)
-        .map((cs) => ({
-          id: cs.id,
-          subject_id: cs.subject_id,
-          name: cs.subject?.name || "",
-          code: cs.subject?.code || "",
-          coefficient: cs.coefficient,
-          group_name: cs.subject?.subject_group?.name || "",
-          group_order: cs.subject?.subject_group?.order || 0,
-        }))
-        .sort((a, b) => a.group_order - b.group_order || a.name.localeCompare(b.name))
+      if (csError) {
+        console.error("class_subjects error:", csError)
+      }
+
+      // Fetch level subjects (tronc commun) - simple query without ordering
+      const { data: levelSubjectsData, error: lsError } = await supabase
+        .from("level_subjects")
+        .select("id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))")
+        .eq("level_id", levelId)
+
+      if (lsError) {
+        console.error("level_subjects error:", lsError)
+      }
+
+      // Combine subjects - class subjects take priority
+      const subjectsMap = new Map<string, Subject>()
+
+      // Add class subjects first
+      if (classSubjectsData) {
+        for (const cs of classSubjectsData) {
+          if (cs.subject && cs.subject_id) {
+            const subj = cs.subject as any
+            subjectsMap.set(cs.subject_id, {
+              id: cs.id,
+              subject_id: cs.subject_id,
+              name: subj.name || "",
+              code: subj.code || "",
+              coefficient: cs.coefficient || 1,
+              group_name: subj.subject_group?.name || "Autres",
+            })
+          }
+        }
+      }
+
+      // Add level subjects (tronc commun) - skip if already in class
+      if (levelSubjectsData) {
+        for (const ls of levelSubjectsData) {
+          if (ls.subject && ls.subject_id && !subjectsMap.has(ls.subject_id)) {
+            const subj = ls.subject as any
+            subjectsMap.set(ls.subject_id, {
+              id: ls.id,
+              subject_id: ls.subject_id,
+              name: subj.name || "",
+              code: subj.code || "",
+              coefficient: ls.coefficient || 1,
+              group_name: subj.subject_group?.name || "Autres",
+            })
+          }
+        }
+      }
+
+      const subjects = Array.from(subjectsMap.values()).sort(
+        (a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name),
+      )
 
       // Get students
-      const { data: students } = await supabase
+      const { data: students, error: studentsError } = await supabase
         .from("students")
         .select("id, matricule, first_name, last_name")
         .eq("class_id", classId)
-        .eq("status", "Active")
+        .ilike("status", "active")
         .order("last_name")
+
+      if (studentsError) throw studentsError
 
       // Get grades
       const studentIds = (students || []).map((s) => s.id)
-      const { data: grades } = await supabase
-        .from("grades")
-        .select("student_id, subject_id, score, coefficient")
-        .in("student_id", studentIds)
-        .eq("academic_period_id", selectedPeriod)
+      const subjectIds = subjects.map((s) => s.subject_id)
+
+      let grades: any[] = []
+      if (studentIds.length > 0 && subjectIds.length > 0) {
+        const { data: gradesData, error: gradesError } = await supabase
+          .from("grades")
+          .select("student_id, subject_id, score")
+          .in("student_id", studentIds)
+          .in("subject_id", subjectIds)
+          .eq("academic_period_id", selectedPeriod)
+
+        if (gradesError) {
+          console.error("grades error:", gradesError)
+        }
+        grades = gradesData || []
+      }
 
       // Calculate student reports
       const studentReports: StudentReport[] = (students || []).map((student) => {
-        const studentGrades = (grades || []).filter((g) => g.student_id === student.id)
+        const studentGrades = grades.filter((g) => g.student_id === student.id)
         const gradesMap: Record<string, number> = {}
-
         let totalWeighted = 0
         let totalCoef = 0
 
@@ -200,12 +257,10 @@ export default function BordereauxPage() {
           }
         })
 
-        const average = totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0
-
         return {
           student,
           grades: gradesMap,
-          average,
+          average: totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0,
           rank: 0,
         }
       })
@@ -220,16 +275,15 @@ export default function BordereauxPage() {
         report.rank = currentRank
       })
 
-      // Calculate class average
+      // Calculate averages
       const classAverage =
         studentReports.length > 0
           ? Math.round((studentReports.reduce((sum, r) => sum + r.average, 0) / studentReports.length) * 100) / 100
           : 0
 
-      // Calculate subject averages
       const subjectAverages: Record<string, number> = {}
       subjects.forEach((subject) => {
-        const subjectGrades = (grades || []).filter((g) => g.subject_id === subject.subject_id)
+        const subjectGrades = grades.filter((g) => g.subject_id === subject.subject_id)
         if (subjectGrades.length > 0) {
           subjectAverages[subject.subject_id] =
             Math.round((subjectGrades.reduce((sum, g) => sum + g.score, 0) / subjectGrades.length) * 100) / 100
@@ -238,7 +292,7 @@ export default function BordereauxPage() {
 
       setReportData({
         class: classData,
-        period: period!,
+        period,
         subjects,
         students: sorted,
         classAverage,
@@ -248,16 +302,14 @@ export default function BordereauxPage() {
       setShowReport(true)
       toast.success("Bordereau généré avec succès")
     } catch (error) {
-      console.error("[v0] Error generating report:", error)
+      console.error("Error generating report:", error)
       toast.error("Erreur lors de la génération du bordereau")
     } finally {
       setGenerating(false)
     }
-  }
+  }, [supabase, mode, selectedClass, selectedLevel, selectedSection, selectedPeriod])
 
-  const handlePrint = () => {
-    window.print()
-  }
+  const handlePrint = () => window.print()
 
   const handleDownloadPDF = async () => {
     if (!reportData) return
@@ -267,7 +319,7 @@ export default function BordereauxPage() {
       await generatePDF("bordereau-document", filename, "landscape")
       toast.success("PDF téléchargé avec succès")
     } catch (error) {
-      console.error("[v0] Error downloading PDF:", error)
+      console.error("Error downloading PDF:", error)
       toast.error("Erreur lors du téléchargement")
     } finally {
       setDownloading(false)
@@ -275,22 +327,18 @@ export default function BordereauxPage() {
   }
 
   const filteredLevels = selectedSection ? levels.filter((l) => l.section_id === selectedSection) : levels
-  const filteredClasses = classes.filter((c) => {
-    if (selectedSection && c.section_id !== selectedSection) return false
-    if (selectedLevel && c.level_id !== selectedLevel) return false
-    return true
-  })
 
   // Group subjects by group
-  const subjectsByGroup = useMemo(() => {
-    if (!reportData) return {}
-    const groups: Record<string, Subject[]> = {}
-    reportData.subjects.forEach((s) => {
-      if (!groups[s.group_name]) groups[s.group_name] = []
-      groups[s.group_name].push(s)
-    })
-    return groups
-  }, [reportData])
+  const subjectsByGroup = reportData
+    ? reportData.subjects.reduce(
+        (acc, s) => {
+          if (!acc[s.group_name]) acc[s.group_name] = []
+          acc[s.group_name].push(s)
+          return acc
+        },
+        {} as Record<string, Subject[]>,
+      )
+    : {}
 
   if (loading) {
     return (
@@ -318,7 +366,6 @@ export default function BordereauxPage() {
         )}
       </PageHeader>
 
-      {/* Mode Selection */}
       <Tabs
         value={mode}
         onValueChange={(v) => {
@@ -337,7 +384,6 @@ export default function BordereauxPage() {
         </TabsList>
       </Tabs>
 
-      {/* Selection Form */}
       <Card className="mb-6 print:hidden">
         <CardHeader>
           <CardTitle className="text-lg">Paramètres du Bordereau</CardTitle>
@@ -456,7 +502,6 @@ export default function BordereauxPage() {
         </CardContent>
       </Card>
 
-      {/* Report Preview */}
       {showReport && reportData && (
         <BordereauDocument
           ref={reportRef}
