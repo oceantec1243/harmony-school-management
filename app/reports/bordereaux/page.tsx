@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Download, FileText, Printer, Loader2, Eye } from "lucide-react"
-import { createBrowserClient } from "@supabase/ssr"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { BordereauDocument } from "@/components/reports/bordereau-document"
 import { generateBordereauPDF } from "@/lib/services/bordereau-pdf-generator"
@@ -71,10 +71,7 @@ export default function BordereauxPage() {
 
   const reportRef = useRef<HTMLDivElement>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  )
+  const supabase = createClient()
 
   useEffect(() => {
     async function fetchInitialData() {

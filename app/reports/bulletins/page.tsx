@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Skeleton } from "@/components/ui/skeleton"
 import { StudentAvatar } from "@/components/students/student-avatar"
 import { Download, Search, Eye, Loader2, Printer, FileArchive } from "lucide-react"
-import { createBrowserClient } from "@supabase/ssr"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { BulletinDocument } from "@/components/reports/bulletin-document"
@@ -50,10 +50,7 @@ export default function BulletinsPage() {
   const [bulletinData, setBulletinData] = useState<any>(null)
   const [schoolSettings, setSchoolSettings] = useState<any>(null)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  )
+  const supabase = createClient()
 
   useEffect(() => {
     async function fetchInitialData() {
