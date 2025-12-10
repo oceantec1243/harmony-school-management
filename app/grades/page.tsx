@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { createBrowserClient } from "@supabase/ssr"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -9,11 +9,10 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { AppLayout } from "@/components/layout/app-layout"
-import { PageHeader } from "@/components/ui/page-header"
-import { Save, BookOpen, Users, CheckCircle2, AlertCircle } from "lucide-react"
 import { toast } from "sonner"
+import { Save, BookOpen, Users, CheckCircle2, X } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import React from "react"
 
 interface Section {
   id: string
@@ -50,6 +49,8 @@ interface CombinedSubject {
   subject: Subject
   coefficient: number
   source: "class" | "level"
+  classSubjectId?: string
+  levelSubjectId?: string
 }
 
 interface Student {
@@ -71,8 +72,11 @@ interface Grade {
   id: string
   student_id: string
   subject_id: string
-  period_id: string
+  academic_period_id: string
   score: number
+  coefficient: number
+  class_subject_id: string | null
+  level_subject_id: string | null
 }
 
 type GradeMode = "tronc_commun" | "specialite"
@@ -96,13 +100,18 @@ export default function GradesPage() {
   const [grades, setGrades] = useState<Record<string, Record<string, Record<string, number | null>>>>({})
   const [saving, setSaving] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [showSuccessModal, setShowSuccessModal] = useState(false)
+  const [successModalData, setSuccessModalData] = useState<{ count: number; subject: string; coefficient: number }>({
+    count: 0,
+    subject: "",
+    coefficient: 1,
+  })
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   )
 
-  // Fetch initial data
   useEffect(() => {
     const fetchData = async () => {
       const [sectionsRes, sequencesRes] = await Promise.all([
@@ -116,7 +125,6 @@ export default function GradesPage() {
     fetchData()
   }, [supabase])
 
-  // Fetch levels when section changes
   useEffect(() => {
     if (selectedSection) {
       const fetchLevels = async () => {
@@ -133,7 +141,6 @@ export default function GradesPage() {
     }
   }, [selectedSection, supabase])
 
-  // Fetch classes when level changes
   useEffect(() => {
     if (selectedLevel) {
       const fetchClasses = async () => {
@@ -148,98 +155,84 @@ export default function GradesPage() {
     }
   }, [selectedLevel, supabase])
 
-  const fetchLevelSubjects = useCallback(
-    async (levelId: string) => {
-      const { data, error } = await supabase
-        .from("level_subjects")
-        .select("*, subject:subjects(*, subject_group:subject_groups(*))")
-        .eq("level_id", levelId)
+  const fetchLevelSubjects = async (levelId: string) => {
+    const { data, error } = await supabase
+      .from("level_subjects")
+      .select("*, subject:subjects(*, subject_group:subject_groups(*))")
+      .eq("level_id", levelId)
 
-      if (error) {
-        console.error("[v0] Error fetching level subjects:", error)
-        return
-      }
+    if (error) {
+      console.error("[v0] Error fetching level subjects:", error)
+      return
+    }
 
-      const levelSubjects: CombinedSubject[] = (data || []).map((ls: any) => ({
-        id: ls.id,
-        subject_id: ls.subject_id,
-        subject: ls.subject,
-        coefficient: ls.coefficient || 1,
-        source: "level" as const,
-      }))
+    const levelSubjects: CombinedSubject[] = (data || []).map((ls: any) => ({
+      id: ls.id,
+      subject_id: ls.subject_id,
+      subject: ls.subject,
+      coefficient: ls.coefficient || 1,
+      source: "level" as const,
+      levelSubjectId: ls.id,
+    }))
 
-      console.log(`[v0] Level subjects loaded: ${levelSubjects.length}`)
-      setCombinedSubjects(levelSubjects)
-    },
-    [supabase],
-  )
+    console.log(`[v0] Level subjects loaded: ${levelSubjects.length}`)
+    setCombinedSubjects(levelSubjects)
+  }
 
-  const fetchLevelStudents = useCallback(
-    async (levelId: string) => {
-      // First get all classes in this level
-      const { data: levelClasses } = await supabase.from("classes").select("id, name").eq("level_id", levelId)
+  const fetchLevelStudents = async (levelId: string) => {
+    const { data: levelClasses } = await supabase.from("classes").select("id, name").eq("level_id", levelId)
 
-      if (!levelClasses || levelClasses.length === 0) {
-        setStudents([])
-        return
-      }
+    if (!levelClasses || levelClasses.length === 0) {
+      setStudents([])
+      return
+    }
 
-      const classIds = levelClasses.map((c) => c.id)
-      const classMap = new Map(levelClasses.map((c) => [c.id, c.name]))
+    const classIds = levelClasses.map((c) => c.id)
+    const classMap = new Map(levelClasses.map((c) => [c.id, c.name]))
 
-      // Fetch all students from these classes
-      const { data, error } = await supabase
-        .from("students")
-        .select("*")
-        .in("class_id", classIds)
-        .ilike("status", "active")
-        .order("last_name")
+    const { data } = await supabase
+      .from("students")
+      .select("*")
+      .in("class_id", classIds)
+      .ilike("status", "active")
+      .order("last_name")
 
-      if (error) {
-        console.error("[v0] Error fetching level students:", error)
-        return
-      }
-
-      // Add class_name to each student
-      const studentsWithClass: Student[] = (data || []).map((s: any) => ({
+    if (data) {
+      const studentsWithClass: Student[] = data.map((s: any) => ({
         ...s,
         class_name: classMap.get(s.class_id) || "N/A",
       }))
-
       console.log(`[v0] Level students loaded: ${studentsWithClass.length} from ${levelClasses.length} classes`)
       setStudents(studentsWithClass)
-    },
-    [supabase],
-  )
+    }
+  }
 
-  const fetchClassSubjects = useCallback(
-    async (classId: string) => {
-      const classData = classes.find((c) => c.id === classId)
-      if (!classData) return
+  const fetchClassSubjects = async (classId: string) => {
+    const classData = classes.find((c) => c.id === classId)
+    if (!classData) return
 
-      const { data, error } = await supabase
-        .from("class_subjects")
-        .select("*, subject:subjects(*, subject_group:subject_groups(*))")
-        .eq("class_id", classId)
+    const { data, error } = await supabase
+      .from("class_subjects")
+      .select("*, subject:subjects(*, subject_group:subject_groups(*))")
+      .eq("class_id", classId)
 
-      if (error) {
-        console.error("[v0] Error fetching class subjects:", error)
-        return
-      }
+    if (error) {
+      console.error("[v0] Error fetching class subjects:", error)
+      return
+    }
 
-      const classSubjects: CombinedSubject[] = (data || []).map((cs: any) => ({
-        id: cs.id,
-        subject_id: cs.subject_id,
-        subject: cs.subject,
-        coefficient: cs.coefficient || 1,
-        source: "class" as const,
-      }))
+    const classSubjects: CombinedSubject[] = (data || []).map((cs: any) => ({
+      id: cs.id,
+      subject_id: cs.subject_id,
+      subject: cs.subject,
+      coefficient: cs.coefficient || 1,
+      source: "class" as const,
+      classSubjectId: cs.id,
+    }))
 
-      console.log(`[v0] Class subjects loaded: ${classSubjects.length}`)
-      setCombinedSubjects(classSubjects)
-    },
-    [classes, supabase],
-  )
+    console.log(`[v0] Class subjects loaded: ${classSubjects.length}`)
+    setCombinedSubjects(classSubjects)
+  }
 
   useEffect(() => {
     setSelectedSubject("")
@@ -253,9 +246,8 @@ export default function GradesPage() {
     } else if (gradeMode === "specialite" && selectedClass) {
       fetchClassSubjects(selectedClass)
     }
-  }, [gradeMode, selectedLevel, selectedClass, fetchLevelSubjects, fetchLevelStudents, fetchClassSubjects])
+  }, [gradeMode, selectedLevel, selectedClass])
 
-  // Fetch students when class changes (for specialite mode)
   useEffect(() => {
     if (gradeMode === "specialite" && selectedClass) {
       const fetchStudents = async () => {
@@ -268,23 +260,26 @@ export default function GradesPage() {
         if (data) setStudents(data)
       }
       fetchStudents()
-      fetchClassSubjects(selectedClass)
     }
-  }, [selectedClass, supabase, fetchClassSubjects, gradeMode])
+  }, [selectedClass, supabase])
 
-  // Fetch existing grades when subject or sequences change
   useEffect(() => {
     if (selectedSubject && selectedSequences.length > 0 && students.length > 0) {
       const fetchGrades = async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("grades")
           .select("*")
           .eq("subject_id", selectedSubject)
-          .in("period_id", selectedSequences)
+          .in("academic_period_id", selectedSequences)
           .in(
             "student_id",
             students.map((s) => s.id),
           )
+
+        if (error) {
+          console.log("[v0] Error fetching grades:", error.message)
+          return
+        }
 
         const gradesMap: Record<string, Record<string, Record<string, number | null>>> = {}
 
@@ -296,9 +291,9 @@ export default function GradesPage() {
           })
         })
 
-        data?.forEach((grade: Grade) => {
-          if (gradesMap[grade.student_id] && gradesMap[grade.student_id][grade.period_id]) {
-            gradesMap[grade.student_id][grade.period_id][grade.subject_id] = grade.score
+        data?.forEach((grade: any) => {
+          if (gradesMap[grade.student_id] && gradesMap[grade.student_id][grade.academic_period_id]) {
+            gradesMap[grade.student_id][grade.academic_period_id][grade.subject_id] = grade.score
           }
         })
 
@@ -349,7 +344,22 @@ export default function GradesPage() {
     setProgress(0)
 
     try {
-      const gradesToSave: { student_id: string; subject_id: string; academic_period_id: string; score: number }[] = []
+      const currentSubject = combinedSubjects.find((s) => s.id === selectedSubject)
+      const coefficient = currentSubject?.coefficient || 1
+
+      const gradesToSave: {
+        student_id: string
+        subject_id: string
+        academic_period_id: string
+        score: number
+        coefficient: number
+        class_subject_id: string | null
+        level_subject_id: string | null
+        entered_at: string
+        updated_at: string
+      }[] = []
+
+      const now = new Date().toISOString()
 
       Object.entries(grades).forEach(([studentId, sequences]) => {
         Object.entries(sequences).forEach(([sequenceId, subjects]) => {
@@ -358,8 +368,13 @@ export default function GradesPage() {
             gradesToSave.push({
               student_id: studentId,
               subject_id: selectedSubject,
-              academic_period_id: sequenceId, // Changed from period_id
+              academic_period_id: sequenceId,
               score: Number(score),
+              coefficient: coefficient,
+              class_subject_id: currentSubject?.source === "class" ? currentSubject.classSubjectId || null : null,
+              level_subject_id: currentSubject?.source === "level" ? currentSubject.levelSubjectId || null : null,
+              entered_at: now,
+              updated_at: now,
             })
           }
         })
@@ -371,40 +386,38 @@ export default function GradesPage() {
         return
       }
 
-      let savedCount = 0
-      let errorCount = 0
+      setProgress(30)
 
-      for (const grade of gradesToSave) {
-        const { error } = await supabase.from("grades").upsert(grade, {
+      const { error, data } = await supabase
+        .from("grades")
+        .upsert(gradesToSave, {
           onConflict: "student_id,subject_id,academic_period_id",
+          ignoreDuplicates: false,
         })
+        .select()
 
-        if (error) {
-          console.error("[v0] Error saving grade:", error.message)
-          errorCount++
-        } else {
-          savedCount++
-        }
+      setProgress(90)
 
-        setProgress(Math.round(((savedCount + errorCount) / gradesToSave.length) * 100))
+      if (error) {
+        console.error("[v0] Batch upsert error:", error)
+        toast.error("Erreur lors de l'enregistrement: " + error.message)
+        setSaving(false)
+        return
       }
 
-      if (errorCount > 0) {
-        toast.warning(`${savedCount} notes enregistrées, ${errorCount} erreurs`)
-      } else {
-        toast.success(
-          <div className="flex flex-col gap-1">
-            <span className="font-semibold">Enregistrement réussi!</span>
-            <span>
-              {savedCount} note{savedCount > 1 ? "s" : ""} enregistrée{savedCount > 1 ? "s" : ""} avec succès dans la
-              base de données.
-            </span>
-          </div>,
-        )
-      }
+      const savedCount = data?.length || gradesToSave.length
+
+      setProgress(100)
+
+      setSuccessModalData({
+        count: savedCount,
+        subject: currentSubject?.name || "",
+        coefficient: coefficient,
+      })
+      setShowSuccessModal(true)
     } catch (error) {
-      console.error("[v0] Error:", error)
-      toast.error("Une erreur est survenue lors de l'enregistrement")
+      console.error("[v0] Error saving grades:", error)
+      toast.error("Erreur lors de l'enregistrement des notes")
     } finally {
       setSaving(false)
       setProgress(0)
@@ -417,12 +430,75 @@ export default function GradesPage() {
 
   const selectedLevelName = levels.find((l) => l.id === selectedLevel)?.name || ""
 
-  return (
-    <AppLayout>
-      <div className="space-y-6">
-        <PageHeader title="Saisie des Notes" description="Saisissez les notes des élèves par classe et par matière" />
+  const groupedStudents = useMemo(() => {
+    if (gradeMode !== "tronc_commun" || students.length === 0) {
+      return null
+    }
 
-        {/* Filters */}
+    const groups: { [className: string]: Student[] } = {}
+
+    students.forEach((student) => {
+      const className = student.class_name || "Sans classe"
+      if (!groups[className]) {
+        groups[className] = []
+      }
+      groups[className].push(student)
+    })
+
+    Object.keys(groups).forEach((className) => {
+      groups[className].sort((a, b) => {
+        const nameA = `${a.last_name} ${a.first_name}`.toLowerCase()
+        const nameB = `${b.last_name} ${b.first_name}`.toLowerCase()
+        return nameA.localeCompare(nameB)
+      })
+    })
+
+    const sortedClassNames = Object.keys(groups).sort((a, b) => a.localeCompare(b))
+
+    return { groups, sortedClassNames }
+  }, [students, gradeMode])
+
+  return (
+    <div className="container mx-auto py-6 space-y-6">
+      <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader className="text-center">
+            <div
+              className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full"
+              style={{ backgroundColor: "#dcfce7" }}
+            >
+              <CheckCircle2 className="h-10 w-10" style={{ color: "#16a34a" }} />
+            </div>
+            <DialogTitle className="text-center text-xl">Enregistrement réussi!</DialogTitle>
+            <DialogDescription asChild>
+              <div className="text-center space-y-2 pt-2">
+                <div className="text-lg font-medium" style={{ color: "#0f172a" }}>
+                  {successModalData.count} note{successModalData.count > 1 ? "s" : ""} enregistrée
+                  {successModalData.count > 1 ? "s" : ""}
+                </div>
+                <div className="text-sm" style={{ color: "#64748b" }}>
+                  Matière: <span className="font-medium">{successModalData.subject}</span>
+                </div>
+                <div className="text-sm" style={{ color: "#64748b" }}>
+                  Coefficient: <span className="font-medium">{successModalData.coefficient}</span>
+                </div>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-center pt-4">
+            <Button onClick={() => setShowSuccessModal(false)} style={{ backgroundColor: "#16a34a", color: "white" }}>
+              Continuer
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Saisie des Notes</h1>
+          <p className="text-sm text-muted-foreground">Saisissez les notes des élèves par classe et par matière</p>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -520,7 +596,6 @@ export default function GradesPage() {
               </div>
             )}
 
-            {/* Subject Selection */}
             {combinedSubjects.length > 0 && (
               <div className="space-y-2">
                 <Label>Matière ({combinedSubjects.length} disponibles)</Label>
@@ -545,7 +620,6 @@ export default function GradesPage() {
               </div>
             )}
 
-            {/* Sequence Selection */}
             {selectedSubject && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -589,7 +663,6 @@ export default function GradesPage() {
           </CardContent>
         </Card>
 
-        {/* Grades Table */}
         {selectedSubject && selectedSequences.length > 0 && students.length > 0 && (
           <Card>
             <CardHeader>
@@ -609,7 +682,9 @@ export default function GradesPage() {
                 <Button onClick={handleSaveGrades} disabled={saving}>
                   {saving ? (
                     <>
-                      <Progress value={progress} className="w-20 mr-2" />
+                      <div className="w-20 mr-2 h-4 bg-blue-200 rounded-full overflow-hidden">
+                        <div className="h-full bg-blue-500" style={{ width: `${progress}%` }}></div>
+                      </div>
                       {progress}%
                     </>
                   ) : (
@@ -622,14 +697,13 @@ export default function GradesPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                 <table className="w-full border-collapse">
-                  <thead>
+                  <thead className="sticky top-0 bg-background z-10">
                     <tr className="bg-muted/50">
                       <th className="border p-2 text-left">#</th>
                       <th className="border p-2 text-left">Matricule</th>
                       <th className="border p-2 text-left">Nom & Prénom</th>
-                      {gradeMode === "tronc_commun" && <th className="border p-2 text-left">Classe</th>}
                       {selectedSequencesList.map((seq) => (
                         <th key={seq.id} className="border p-2 text-center min-w-[100px]">
                           {seq.name}
@@ -639,52 +713,110 @@ export default function GradesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {students.map((student, index) => {
-                      const avg = calculateAverage(student.id)
-                      return (
-                        <tr key={student.id} className="hover:bg-muted/30">
-                          <td className="border p-2 text-center text-muted-foreground">{index + 1}</td>
-                          <td className="border p-2 text-sm">{student.matricule}</td>
-                          <td className="border p-2 font-medium">
-                            {student.last_name} {student.first_name}
-                          </td>
-                          {gradeMode === "tronc_commun" && (
-                            <td className="border p-2 text-sm">
-                              <Badge variant="outline">{student.class_name}</Badge>
+                    {gradeMode === "tronc_commun" && groupedStudents ? (
+                      <>
+                        {groupedStudents.sortedClassNames.map((className) => {
+                          const classStudents = groupedStudents.groups[className]
+                          return (
+                            <React.Fragment key={className}>
+                              <tr className="bg-primary/20">
+                                <td
+                                  colSpan={4 + selectedSequencesList.length}
+                                  className="border p-3 font-bold text-primary"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Users className="h-5 w-5" />
+                                    <span>{className}</span>
+                                    <Badge variant="secondary" className="ml-2">
+                                      {classStudents.length} élèves
+                                    </Badge>
+                                  </div>
+                                </td>
+                              </tr>
+                              {classStudents.map((student, index) => {
+                                const avg = calculateAverage(student.id)
+                                return (
+                                  <tr key={student.id} className="hover:bg-muted/30">
+                                    <td className="border p-2 text-center text-muted-foreground">{index + 1}</td>
+                                    <td className="border p-2 text-sm">{student.matricule}</td>
+                                    <td className="border p-2 font-medium">
+                                      {student.last_name} {student.first_name}
+                                    </td>
+                                    {selectedSequencesList.map((seq) => (
+                                      <td key={seq.id} className="border p-1 text-center">
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          max="20"
+                                          step="0.25"
+                                          value={grades[student.id]?.[seq.id]?.[selectedSubject] ?? ""}
+                                          onChange={(e) => handleGradeChange(student.id, seq.id, e.target.value)}
+                                          className={`w-20 mx-auto text-center ${
+                                            (grades[student.id]?.[seq.id]?.[selectedSubject] ?? 0) < 10
+                                              ? "text-red-600"
+                                              : "text-green-600"
+                                          }`}
+                                        />
+                                      </td>
+                                    ))}
+                                    <td className="border p-2 text-center font-bold bg-primary/5">
+                                      {avg !== null ? (
+                                        <span className={avg < 10 ? "text-red-600" : "text-green-600"}>
+                                          {avg.toFixed(2)}
+                                        </span>
+                                      ) : (
+                                        "-"
+                                      )}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </React.Fragment>
+                          )
+                        })}
+                      </>
+                    ) : (
+                      students.map((student, index) => {
+                        const avg = calculateAverage(student.id)
+                        return (
+                          <tr key={student.id} className="hover:bg-muted/30">
+                            <td className="border p-2 text-center text-muted-foreground">{index + 1}</td>
+                            <td className="border p-2 text-sm">{student.matricule}</td>
+                            <td className="border p-2 font-medium">
+                              {student.last_name} {student.first_name}
                             </td>
-                          )}
-                          {selectedSequencesList.map((seq) => (
-                            <td key={seq.id} className="border p-1 text-center">
-                              <Input
-                                type="number"
-                                min="0"
-                                max="20"
-                                step="0.25"
-                                value={grades[student.id]?.[seq.id]?.[selectedSubject] ?? ""}
-                                onChange={(e) => handleGradeChange(student.id, seq.id, e.target.value)}
-                                className={`w-20 mx-auto text-center ${
-                                  (grades[student.id]?.[seq.id]?.[selectedSubject] ?? 0) < 10
-                                    ? "text-red-600"
-                                    : "text-green-600"
-                                }`}
-                              />
+                            {selectedSequencesList.map((seq) => (
+                              <td key={seq.id} className="border p-1 text-center">
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  max="20"
+                                  step="0.25"
+                                  value={grades[student.id]?.[seq.id]?.[selectedSubject] ?? ""}
+                                  onChange={(e) => handleGradeChange(student.id, seq.id, e.target.value)}
+                                  className={`w-20 mx-auto text-center ${
+                                    (grades[student.id]?.[seq.id]?.[selectedSubject] ?? 0) < 10
+                                      ? "text-red-600"
+                                      : "text-green-600"
+                                  }`}
+                                />
+                              </td>
+                            ))}
+                            <td className="border p-2 text-center font-bold bg-primary/5">
+                              {avg !== null ? (
+                                <span className={avg < 10 ? "text-red-600" : "text-green-600"}>{avg.toFixed(2)}</span>
+                              ) : (
+                                "-"
+                              )}
                             </td>
-                          ))}
-                          <td className="border p-2 text-center font-bold bg-primary/5">
-                            {avg !== null ? (
-                              <span className={avg < 10 ? "text-red-600" : "text-green-600"}>{avg.toFixed(2)}</span>
-                            ) : (
-                              "-"
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
+                          </tr>
+                        )
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
 
-              {/* Summary */}
               <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1">
                   <CheckCircle2 className="h-4 w-4 text-green-600" />
@@ -698,7 +830,7 @@ export default function GradesPage() {
                   </span>
                 </div>
                 <div className="flex items-center gap-1">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                  <X className="h-4 w-4 text-amber-600" />
                   <span>
                     {
                       Object.values(grades).filter((seqs) =>
@@ -713,7 +845,6 @@ export default function GradesPage() {
           </Card>
         )}
 
-        {/* No students message */}
         {((gradeMode === "specialite" && selectedClass) || (gradeMode === "tronc_commun" && selectedLevel)) &&
           students.length === 0 && (
             <Card>
@@ -729,7 +860,6 @@ export default function GradesPage() {
             </Card>
           )}
 
-        {/* No subjects message */}
         {((gradeMode === "specialite" && selectedClass) || (gradeMode === "tronc_commun" && selectedLevel)) &&
           combinedSubjects.length === 0 && (
             <Card>
@@ -745,6 +875,6 @@ export default function GradesPage() {
             </Card>
           )}
       </div>
-    </AppLayout>
+    </div>
   )
 }
