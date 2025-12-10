@@ -6,12 +6,13 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { PageHeader } from "@/components/ui/page-header"
 import { DataTable, type Column } from "@/components/ui/data-table"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { StudentAvatar } from "@/components/students/student-avatar"
 import { StatusBadge } from "@/components/students/status-badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Plus, Download, MoreHorizontal, Eye, Pencil, Trash2 } from "lucide-react"
+import { Plus, Download, MoreHorizontal, Eye, Pencil, Trash2, AlertTriangle } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { calculateAge, formatShortDate } from "@/lib/calculations"
 import { toast } from "sonner"
@@ -25,6 +26,7 @@ type Student = {
   gender: "M" | "F"
   photo: string | null
   status: "Active" | "Suspended" | "Graduated"
+  is_ranked: boolean
   class_id: string
   class: {
     id: string
@@ -49,13 +51,13 @@ export default function StudentsPage() {
   const [levelFilter, setLevelFilter] = useState<string>("all")
   const [classFilter, setClassFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [rankingFilter, setRankingFilter] = useState<string>("all")
 
   const supabase = createClient()
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      // Fetch sections, levels, classes
       const [sectionsRes, levelsRes, classesRes] = await Promise.all([
         supabase.from("sections").select("*").order("name"),
         supabase.from("levels").select("*").order("order"),
@@ -66,7 +68,6 @@ export default function StudentsPage() {
       setLevels(levelsRes.data || [])
       setClasses(classesRes.data || [])
 
-      // Fetch students with class info
       let query = supabase
         .from("students")
         .select(`
@@ -91,13 +92,17 @@ export default function StudentsPage() {
 
       if (error) throw error
 
-      // Apply additional filters on client side for section and level
       let filtered = data || []
       if (sectionFilter !== "all") {
         filtered = filtered.filter((s) => s.class?.section?.id === sectionFilter)
       }
       if (levelFilter !== "all") {
         filtered = filtered.filter((s) => s.class?.level?.id === levelFilter)
+      }
+      if (rankingFilter === "ranked") {
+        filtered = filtered.filter((s) => s.is_ranked !== false)
+      } else if (rankingFilter === "unranked") {
+        filtered = filtered.filter((s) => s.is_ranked === false)
       }
 
       setStudents(filtered)
@@ -107,7 +112,7 @@ export default function StudentsPage() {
     } finally {
       setLoading(false)
     }
-  }, [supabase, sectionFilter, levelFilter, classFilter, statusFilter])
+  }, [supabase, sectionFilter, levelFilter, classFilter, statusFilter, rankingFilter])
 
   useEffect(() => {
     fetchData()
@@ -127,15 +132,15 @@ export default function StudentsPage() {
     }
   }
 
-  // Get filtered levels based on section
   const filteredLevels = sectionFilter === "all" ? levels : levels.filter((l) => l.section_id === sectionFilter)
 
-  // Get filtered classes based on level and section
   const filteredClasses = classes.filter((c) => {
     if (sectionFilter !== "all" && c.section_id !== sectionFilter) return false
     if (levelFilter !== "all" && c.level_id !== levelFilter) return false
     return true
   })
+
+  const unrankedCount = students.filter((s) => s.is_ranked === false).length
 
   const columns: Column<Student>[] = [
     {
@@ -166,11 +171,18 @@ export default function StudentsPage() {
       header: "Nom & Prénom",
       sortable: true,
       cell: (student) => (
-        <div>
-          <p className="font-medium">
-            {student.last_name} {student.first_name}
-          </p>
-          <p className="text-sm text-muted-foreground">{student.gender === "M" ? "Masculin" : "Féminin"}</p>
+        <div className="flex items-center gap-2">
+          <div>
+            <p className="font-medium">
+              {student.last_name} {student.first_name}
+            </p>
+            <p className="text-sm text-muted-foreground">{student.gender === "M" ? "Masculin" : "Féminin"}</p>
+          </div>
+          {student.is_ranked === false && (
+            <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 text-xs">
+              NC
+            </Badge>
+          )}
         </div>
       ),
     },
@@ -248,7 +260,10 @@ export default function StudentsPage() {
 
   return (
     <AppLayout>
-      <PageHeader title="Gestion des Élèves" description={`${students.length} élèves au total`}>
+      <PageHeader
+        title="Gestion des Élèves"
+        description={`${students.length} élèves au total${unrankedCount > 0 ? ` (dont ${unrankedCount} NC)` : ""}`}
+      >
         <Button variant="outline" size="sm">
           <Download className="h-4 w-4 mr-2" />
           Exporter
@@ -329,7 +344,28 @@ export default function StudentsPage() {
             <SelectItem value="Graduated">Diplômé</SelectItem>
           </SelectContent>
         </Select>
+
+        <Select value={rankingFilter} onValueChange={setRankingFilter}>
+          <SelectTrigger className="w-[150px]">
+            <SelectValue placeholder="Classement" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous</SelectItem>
+            <SelectItem value="ranked">Classés</SelectItem>
+            <SelectItem value="unranked">Non Classés (NC)</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
+
+      {unrankedCount > 0 && rankingFilter !== "ranked" && (
+        <div className="flex items-center gap-2 mb-4 p-3 rounded-lg bg-orange-50 border border-orange-200 text-orange-800 text-sm">
+          <AlertTriangle className="h-4 w-4" />
+          <span>
+            {unrankedCount} élève{unrankedCount > 1 ? "s" : ""} marqué{unrankedCount > 1 ? "s" : ""} comme "Non Classé"
+            (NC). Ces élèves n'influencent pas les statistiques de la classe.
+          </span>
+        </div>
+      )}
 
       {/* Data Table */}
       <DataTable

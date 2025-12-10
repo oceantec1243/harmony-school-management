@@ -12,9 +12,11 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
-import { ArrowLeft, Save, User, Users, MapPin } from "lucide-react"
+import { ArrowLeft, Save, User, Users, MapPin, AlertTriangle } from "lucide-react"
 import Link from "next/link"
 
 type Section = { id: string; name: string }
@@ -52,6 +54,7 @@ export default function EditStudentPage() {
     guardian_phone: "",
     address: "",
     status: "Active" as "Active" | "Suspended" | "Graduated",
+    is_ranked: true,
   })
 
   const fetchData = useCallback(async () => {
@@ -97,6 +100,7 @@ export default function EditStudentPage() {
           guardian_phone: student.guardian_phone || "",
           address: student.address || "",
           status: student.status || "Active",
+          is_ranked: student.is_ranked !== false, // Par défaut true si non défini
         })
         setSelectedSection(student.class?.section_id || "")
         setSelectedLevel(student.class?.level_id || "")
@@ -155,6 +159,7 @@ export default function EditStudentPage() {
           guardian_phone: formData.guardian_phone || null,
           address: formData.address || null,
           status: formData.status,
+          is_ranked: formData.is_ranked,
         })
         .eq("id", id)
 
@@ -287,8 +292,53 @@ export default function EditStudentPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <div className="space-y-2 md:col-span-2 lg:col-span-1">
+              <Label>Classement</Label>
+              <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
+                <Switch
+                  checked={!formData.is_ranked}
+                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_ranked: !checked }))}
+                />
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">Non Classé (NC)</span>
+                    {!formData.is_ranked && (
+                      <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                        <AlertTriangle className="h-3 w-3 mr-1" />
+                        NC
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {formData.is_ranked
+                      ? "L'élève est classé et influence les statistiques"
+                      : "L'élève n'est pas classé et n'influence pas les statistiques"}
+                  </p>
+                </div>
+              </div>
+            </div>
           </CardContent>
         </Card>
+
+        {!formData.is_ranked && (
+          <Card className="border-orange-200 bg-orange-50">
+            <CardContent className="pt-4">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5" />
+                <div>
+                  <h4 className="font-semibold text-orange-800">Élève Non Classé</h4>
+                  <p className="text-sm text-orange-700">
+                    Cet élève est marqué comme "Non Classé". Ses notes seront calculées normalement et son bulletin sera
+                    généré, mais il n'apparaîtra pas dans le classement de la classe et n'influencera pas les
+                    statistiques de performance. Sur les bordereaux, il apparaîtra à la fin de la liste avec la mention
+                    "NC".
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Affectation */}
         <Card>

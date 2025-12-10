@@ -15,7 +15,18 @@ import { StatusBadge } from "@/components/students/status-badge"
 import { createClient } from "@/lib/supabase/client"
 import { calculateAge, formatShortDate } from "@/lib/calculations"
 import { toast } from "sonner"
-import { ArrowLeft, Pencil, Trash2, User, Users, MapPin, Phone, Calendar, GraduationCap } from "lucide-react"
+import {
+  ArrowLeft,
+  Pencil,
+  Trash2,
+  User,
+  Users,
+  MapPin,
+  Phone,
+  Calendar,
+  GraduationCap,
+  AlertTriangle,
+} from "lucide-react"
 
 type Student = {
   id: string
@@ -27,6 +38,7 @@ type Student = {
   gender: "M" | "F"
   photo: string | null
   status: "Active" | "Suspended" | "Graduated"
+  is_ranked: boolean
   enrollment_date: string | null
   father_name: string | null
   father_phone: string | null
@@ -155,6 +167,23 @@ export default function StudentDetailPage() {
         </Button>
       </PageHeader>
 
+      {student.is_ranked === false && (
+        <Card className="mb-6 border-orange-200 bg-orange-50">
+          <CardContent className="pt-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-orange-800">Élève Non Classé (NC)</h4>
+                <p className="text-sm text-orange-700">
+                  Cet élève est marqué comme "Non Classé". Ses notes sont calculées mais n'influencent pas les
+                  statistiques de la classe. Il apparaît à la fin des bordereaux avec la mention "NC".
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header Card */}
       <Card className="mb-6">
         <CardContent className="pt-6">
@@ -167,8 +196,13 @@ export default function StudentDetailPage() {
             />
             <div className="flex-1 space-y-4">
               <div>
-                <h2 className="text-2xl font-bold">
+                <h2 className="text-2xl font-bold flex items-center gap-2">
                   {student.last_name} {student.first_name}
+                  {student.is_ranked === false && (
+                    <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
+                      NC
+                    </Badge>
+                  )}
                 </h2>
                 <p className="text-muted-foreground font-mono">{student.matricule}</p>
               </div>

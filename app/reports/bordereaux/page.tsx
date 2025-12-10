@@ -9,11 +9,11 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Download, FileText, Printer, Loader2 } from "lucide-react"
+import { Download, FileText, Printer, Loader2, Eye } from "lucide-react"
 import { createBrowserClient } from "@supabase/ssr"
 import { toast } from "sonner"
 import { BordereauDocument } from "@/components/reports/bordereau-document"
-import { generatePDF } from "@/lib/services/pdf-service"
+import { generateBordereauPDF } from "@/lib/services/bordereau-pdf-generator"
 
 type Section = { id: string; name: string }
 type Level = { id: string; name: string; section_id: string }
@@ -30,7 +30,13 @@ type Subject = {
 }
 
 type StudentReport = {
-  student: { id: string; matricule: string; first_name: string; last_name: string }
+  student: {
+    id: string
+    matricule: string
+    first_name: string
+    last_name: string
+    is_ranked?: boolean
+  }
   grades: Record<string, number>
   average: number
   rank: number
@@ -110,7 +116,6 @@ export default function BordereauxPage() {
       let classId = selectedClass
       let classData: any = null
 
-      // Get class data
       if (mode === "class" && selectedClass) {
         const { data, error } = await supabase
           .from("classes")
@@ -140,9 +145,7 @@ export default function BordereauxPage() {
       }
 
       const levelId = classData.level_id
-      const sectionId = classData.section_id
 
-      // Get period
       const { data: period, error: periodError } = await supabase
         .from("academic_periods")
         .select("*")
@@ -151,30 +154,18 @@ export default function BordereauxPage() {
 
       if (periodError) throw periodError
 
-      // Fetch class subjects - simple query without ordering
-      const { data: classSubjectsData, error: csError } = await supabase
+      const { data: classSubjectsData } = await supabase
         .from("class_subjects")
         .select("id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))")
         .eq("class_id", classId)
 
-      if (csError) {
-        console.error("class_subjects error:", csError)
-      }
-
-      // Fetch level subjects (tronc commun) - simple query without ordering
-      const { data: levelSubjectsData, error: lsError } = await supabase
+      const { data: levelSubjectsData } = await supabase
         .from("level_subjects")
         .select("id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))")
         .eq("level_id", levelId)
 
-      if (lsError) {
-        console.error("level_subjects error:", lsError)
-      }
-
-      // Combine subjects - class subjects take priority
       const subjectsMap = new Map<string, Subject>()
 
-      // Add class subjects first
       if (classSubjectsData) {
         for (const cs of classSubjectsData) {
           if (cs.subject && cs.subject_id) {
@@ -191,7 +182,6 @@ export default function BordereauxPage() {
         }
       }
 
-      // Add level subjects (tronc commun) - skip if already in class
       if (levelSubjectsData) {
         for (const ls of levelSubjectsData) {
           if (ls.subject && ls.subject_id && !subjectsMap.has(ls.subject_id)) {
@@ -212,36 +202,30 @@ export default function BordereauxPage() {
         (a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name),
       )
 
-      // Get students
       const { data: students, error: studentsError } = await supabase
         .from("students")
-        .select("id, matricule, first_name, last_name")
+        .select("id, matricule, first_name, last_name, is_ranked")
         .eq("class_id", classId)
         .ilike("status", "active")
         .order("last_name")
 
       if (studentsError) throw studentsError
 
-      // Get grades
       const studentIds = (students || []).map((s) => s.id)
       const subjectIds = subjects.map((s) => s.subject_id)
 
       let grades: any[] = []
       if (studentIds.length > 0 && subjectIds.length > 0) {
-        const { data: gradesData, error: gradesError } = await supabase
+        const { data: gradesData } = await supabase
           .from("grades")
           .select("student_id, subject_id, score")
           .in("student_id", studentIds)
           .in("subject_id", subjectIds)
           .eq("academic_period_id", selectedPeriod)
 
-        if (gradesError) {
-          console.error("grades error:", gradesError)
-        }
         grades = gradesData || []
       }
 
-      // Calculate student reports
       const studentReports: StudentReport[] = (students || []).map((student) => {
         const studentGrades = grades.filter((g) => g.student_id === student.id)
         const gradesMap: Record<string, number> = {}
@@ -258,32 +242,47 @@ export default function BordereauxPage() {
         })
 
         return {
-          student,
+          student: {
+            ...student,
+            is_ranked: student.is_ranked !== false, // Par défaut true
+          },
           grades: gradesMap,
           average: totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0,
           rank: 0,
         }
       })
 
-      // Calculate ranks
-      const sorted = [...studentReports].sort((a, b) => b.average - a.average)
+      const rankedStudents = studentReports.filter((r) => r.student.is_ranked !== false)
+      const unrankedStudents = studentReports.filter((r) => r.student.is_ranked === false)
+
+      const sortedRanked = [...rankedStudents].sort((a, b) => b.average - a.average)
       let currentRank = 1
-      sorted.forEach((report, index) => {
-        if (index > 0 && report.average < sorted[index - 1].average) {
+      sortedRanked.forEach((report, index) => {
+        if (index > 0 && report.average < sortedRanked[index - 1].average) {
           currentRank = index + 1
         }
         report.rank = currentRank
       })
 
-      // Calculate averages
+      // Les élèves non classés ont un rang de 0 (NC)
+      unrankedStudents.forEach((report) => {
+        report.rank = 0
+      })
+
+      // Combiner: élèves classés triés par rang, puis non classés à la fin
+      const allStudents = [...sortedRanked, ...unrankedStudents]
+
       const classAverage =
-        studentReports.length > 0
-          ? Math.round((studentReports.reduce((sum, r) => sum + r.average, 0) / studentReports.length) * 100) / 100
+        rankedStudents.length > 0
+          ? Math.round((rankedStudents.reduce((sum, r) => sum + r.average, 0) / rankedStudents.length) * 100) / 100
           : 0
 
       const subjectAverages: Record<string, number> = {}
       subjects.forEach((subject) => {
-        const subjectGrades = grades.filter((g) => g.subject_id === subject.subject_id)
+        const rankedStudentIds = rankedStudents.map((r) => r.student.id)
+        const subjectGrades = grades.filter(
+          (g) => g.subject_id === subject.subject_id && rankedStudentIds.includes(g.student_id),
+        )
         if (subjectGrades.length > 0) {
           subjectAverages[subject.subject_id] =
             Math.round((subjectGrades.reduce((sum, g) => sum + g.score, 0) / subjectGrades.length) * 100) / 100
@@ -294,7 +293,7 @@ export default function BordereauxPage() {
         class: classData,
         period,
         subjects,
-        students: sorted,
+        students: allStudents,
         classAverage,
         subjectAverages,
       })
@@ -315,8 +314,16 @@ export default function BordereauxPage() {
     if (!reportData) return
     setDownloading(true)
     try {
-      const filename = `Bordereau_${reportData.class.name}_${reportData.period.name}.pdf`
-      await generatePDF("bordereau-document", filename, "landscape")
+      const subjectsByGroup = reportData.subjects.reduce(
+        (acc, s) => {
+          if (!acc[s.group_name]) acc[s.group_name] = []
+          acc[s.group_name].push(s)
+          return acc
+        },
+        {} as Record<string, Subject[]>,
+      )
+
+      await generateBordereauPDF(reportData, schoolSettings, subjectsByGroup)
       toast.success("PDF téléchargé avec succès")
     } catch (error) {
       console.error("Error downloading PDF:", error)
@@ -328,7 +335,6 @@ export default function BordereauxPage() {
 
   const filteredLevels = selectedSection ? levels.filter((l) => l.section_id === selectedSection) : levels
 
-  // Group subjects by group
   const subjectsByGroup = reportData
     ? reportData.subjects.reduce(
         (acc, s) => {
@@ -503,12 +509,18 @@ export default function BordereauxPage() {
       </Card>
 
       {showReport && reportData && (
-        <BordereauDocument
-          ref={reportRef}
-          reportData={reportData}
-          schoolSettings={schoolSettings}
-          subjectsByGroup={subjectsByGroup}
-        />
+        <div className="mt-4">
+          <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
+            <Eye className="h-4 w-4" />
+            <span>Aperçu du bordereau (le PDF sera généré directement sans cette prévisualisation)</span>
+          </div>
+          <BordereauDocument
+            ref={reportRef}
+            reportData={reportData}
+            schoolSettings={schoolSettings}
+            subjectsByGroup={subjectsByGroup}
+          />
+        </div>
       )}
     </AppLayout>
   )

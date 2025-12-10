@@ -32,11 +32,11 @@ export function RecentActivity() {
         const { data: recentGrades } = await supabase
           .from("grades")
           .select(`
-            id, created_at,
+            id, updated_at,
             student:students(first_name, last_name, class:classes(name)),
             subject:subjects(name)
           `)
-          .order("created_at", { ascending: false })
+          .order("updated_at", { ascending: false })
           .limit(3)
 
         if (recentGrades) {
@@ -45,7 +45,7 @@ export function RecentActivity() {
               id: `grade-${g.id}`,
               type: "grade",
               message: `Note de ${g.subject?.name || "matière"} saisie pour ${g.student?.first_name || ""} ${g.student?.last_name || ""} (${g.student?.class?.name || ""})`,
-              time: new Date(g.created_at),
+              time: new Date(g.updated_at),
               icon: ClipboardList,
               color: "text-primary",
             })
