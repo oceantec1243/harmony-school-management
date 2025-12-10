@@ -212,6 +212,18 @@ export default function BordereauxPage() {
       if (studentsError) throw studentsError
 
       const studentIds = (students || []).map((s) => s.id)
+
+      let unrankedStudentIds: string[] = []
+      if (studentIds.length > 0) {
+        const { data: unrankedData } = await supabase
+          .from("student_unranked_periods")
+          .select("student_id")
+          .eq("academic_period_id", selectedPeriod)
+          .in("student_id", studentIds)
+
+        unrankedStudentIds = (unrankedData || []).map((u) => u.student_id)
+      }
+
       const subjectIds = subjects.map((s) => s.subject_id)
 
       let grades: any[] = []
@@ -241,10 +253,12 @@ export default function BordereauxPage() {
           }
         })
 
+        const isUnrankedForPeriod = unrankedStudentIds.includes(student.id)
+
         return {
           student: {
             ...student,
-            is_ranked: student.is_ranked !== false, // Par défaut true
+            is_ranked: !isUnrankedForPeriod,
           },
           grades: gradesMap,
           average: totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0,
@@ -252,8 +266,8 @@ export default function BordereauxPage() {
         }
       })
 
-      const rankedStudents = studentReports.filter((r) => r.student.is_ranked !== false)
-      const unrankedStudents = studentReports.filter((r) => r.student.is_ranked === false)
+      const rankedStudents = studentReports.filter((r) => r.student.is_ranked)
+      const unrankedStudents = studentReports.filter((r) => !r.student.is_ranked)
 
       const sortedRanked = [...rankedStudents].sort((a, b) => b.average - a.average)
       let currentRank = 1
@@ -264,12 +278,10 @@ export default function BordereauxPage() {
         report.rank = currentRank
       })
 
-      // Les élèves non classés ont un rang de 0 (NC)
       unrankedStudents.forEach((report) => {
         report.rank = 0
       })
 
-      // Combiner: élèves classés triés par rang, puis non classés à la fin
       const allStudents = [...sortedRanked, ...unrankedStudents]
 
       const classAverage =

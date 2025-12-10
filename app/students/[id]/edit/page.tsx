@@ -5,14 +5,14 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { AppLayout } from "@/components/layout/app-layout"
 import { PageHeader } from "@/components/ui/page-header"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
@@ -22,6 +22,7 @@ import Link from "next/link"
 type Section = { id: string; name: string }
 type Level = { id: string; name: string; section_id: string }
 type ClassType = { id: string; name: string; level_id: string; section_id: string }
+type AcademicPeriod = { id: string; name: string; type: string; number: number; academic_year: string }
 
 export default function EditStudentPage() {
   const params = useParams()
@@ -32,11 +33,14 @@ export default function EditStudentPage() {
   const [sections, setSections] = useState<Section[]>([])
   const [levels, setLevels] = useState<Level[]>([])
   const [classes, setClasses] = useState<ClassType[]>([])
+  const [periods, setPeriods] = useState<AcademicPeriod[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   const [selectedSection, setSelectedSection] = useState<string>("")
   const [selectedLevel, setSelectedLevel] = useState<string>("")
+
+  const [unrankedPeriods, setUnrankedPeriods] = useState<string[]>([])
 
   const [formData, setFormData] = useState({
     matricule: "",
@@ -54,16 +58,16 @@ export default function EditStudentPage() {
     guardian_phone: "",
     address: "",
     status: "Active" as "Active" | "Suspended" | "Graduated",
-    is_ranked: true,
   })
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [sectionsRes, levelsRes, classesRes, studentRes] = await Promise.all([
+      const [sectionsRes, levelsRes, classesRes, periodsRes, studentRes, unrankedRes] = await Promise.all([
         supabase.from("sections").select("*").order("name"),
         supabase.from("levels").select("*").order("order"),
         supabase.from("classes").select("*").order("name"),
+        supabase.from("academic_periods").select("*").eq("type", "sequence").order("number"),
         supabase
           .from("students")
           .select(`
@@ -76,11 +80,17 @@ export default function EditStudentPage() {
           `)
           .eq("id", id)
           .single(),
+        supabase.from("student_unranked_periods").select("academic_period_id").eq("student_id", id),
       ])
 
       setSections(sectionsRes.data || [])
       setLevels(levelsRes.data || [])
       setClasses(classesRes.data || [])
+      setPeriods(periodsRes.data || [])
+
+      if (unrankedRes.data) {
+        setUnrankedPeriods(unrankedRes.data.map((up) => up.academic_period_id))
+      }
 
       if (studentRes.data) {
         const student = studentRes.data
@@ -100,7 +110,6 @@ export default function EditStudentPage() {
           guardian_phone: student.guardian_phone || "",
           address: student.address || "",
           status: student.status || "Active",
-          is_ranked: student.is_ranked !== false, // Par défaut true si non défini
         })
         setSelectedSection(student.class?.section_id || "")
         setSelectedLevel(student.class?.level_id || "")
@@ -125,6 +134,18 @@ export default function EditStudentPage() {
     return true
   })
 
+  const toggleUnrankedPeriod = (periodId: string) => {
+    setUnrankedPeriods((prev) => (prev.includes(periodId) ? prev.filter((id) => id !== periodId) : [...prev, periodId]))
+  }
+
+  const toggleAllPeriods = () => {
+    if (unrankedPeriods.length === periods.length) {
+      setUnrankedPeriods([])
+    } else {
+      setUnrankedPeriods(periods.map((p) => p.id))
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -141,6 +162,7 @@ export default function EditStudentPage() {
 
     setSaving(true)
     try {
+      // Update student basic info
       const { error } = await supabase
         .from("students")
         .update({
@@ -159,11 +181,27 @@ export default function EditStudentPage() {
           guardian_phone: formData.guardian_phone || null,
           address: formData.address || null,
           status: formData.status,
-          is_ranked: formData.is_ranked,
+          is_ranked: unrankedPeriods.length === 0,
         })
         .eq("id", id)
 
       if (error) throw error
+
+      // First, delete all existing entries for this student
+      await supabase.from("student_unranked_periods").delete().eq("student_id", id)
+
+      // Then insert new entries if any
+      if (unrankedPeriods.length > 0) {
+        const insertData = unrankedPeriods.map((periodId) => ({
+          student_id: id,
+          academic_period_id: periodId,
+        }))
+        const { error: insertError } = await supabase.from("student_unranked_periods").insert(insertData)
+        if (insertError) {
+          console.error("[v0] Error inserting unranked periods:", insertError)
+          // Don't throw - the student was updated successfully
+        }
+      }
 
       toast.success("Élève modifié avec succès")
       router.push("/students")
@@ -292,53 +330,99 @@ export default function EditStudentPage() {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2 md:col-span-2 lg:col-span-1">
-              <Label>Classement</Label>
-              <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/30">
-                <Switch
-                  checked={!formData.is_ranked}
-                  onCheckedChange={(checked) => setFormData((prev) => ({ ...prev, is_ranked: !checked }))}
-                />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium">Non Classé (NC)</span>
-                    {!formData.is_ranked && (
-                      <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200">
-                        <AlertTriangle className="h-3 w-3 mr-1" />
-                        NC
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {formData.is_ranked
-                      ? "L'élève est classé et influence les statistiques"
-                      : "L'élève n'est pas classé et n'influence pas les statistiques"}
-                  </p>
-                </div>
-              </div>
-            </div>
           </CardContent>
         </Card>
 
-        {!formData.is_ranked && (
-          <Card className="border-orange-200 bg-orange-50">
-            <CardContent className="pt-4">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="h-5 w-5 text-orange-600 mt-0.5" />
-                <div>
-                  <h4 className="font-semibold text-orange-800">Élève Non Classé</h4>
-                  <p className="text-sm text-orange-700">
-                    Cet élève est marqué comme "Non Classé". Ses notes seront calculées normalement et son bulletin sera
-                    généré, mais il n'apparaîtra pas dans le classement de la classe et n'influencera pas les
-                    statistiques de performance. Sur les bordereaux, il apparaîtra à la fin de la liste avec la mention
-                    "NC".
-                  </p>
+        <Card className={unrankedPeriods.length > 0 ? "border-orange-200" : ""}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5" />
+              Non Classé (NC)
+              {unrankedPeriods.length > 0 && (
+                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 ml-2">
+                  {unrankedPeriods.length} séquence(s)
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Sélectionnez les séquences où cet élève ne doit pas être classé. Ses notes seront calculées mais il
+              n'influencera pas le classement de la classe.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {periods.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Aucune séquence trouvée. Créez des périodes académiques dans Administration.
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm font-medium">Séquences Non Classé</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={toggleAllPeriods}>
+                    {unrankedPeriods.length === periods.length ? "Tout désélectionner" : "Tout sélectionner"}
+                  </Button>
                 </div>
+
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {periods.map((period) => {
+                    const isUnranked = unrankedPeriods.includes(period.id)
+                    return (
+                      <div
+                        key={period.id}
+                        onClick={() => toggleUnrankedPeriod(period.id)}
+                        className={`
+                          flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all
+                          ${
+                            isUnranked
+                              ? "border-orange-400 bg-orange-50"
+                              : "border-muted hover:border-primary/50 hover:bg-muted/50"
+                          }
+                        `}
+                      >
+                        <Checkbox
+                          checked={isUnranked}
+                          onCheckedChange={() => toggleUnrankedPeriod(period.id)}
+                          className={isUnranked ? "border-orange-500 data-[state=checked]:bg-orange-500" : ""}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className={`text-sm font-medium truncate ${isUnranked ? "text-orange-700" : ""}`}>
+                            {period.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">{period.academic_year}</p>
+                        </div>
+                        {isUnranked && (
+                          <Badge variant="outline" className="bg-orange-100 text-orange-700 border-orange-300 text-xs">
+                            NC
+                          </Badge>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {unrankedPeriods.length > 0 && (
+                  <div className="mt-4 p-3 rounded-lg bg-orange-50 border border-orange-200">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-600 mt-0.5 shrink-0" />
+                      <div className="text-sm text-orange-700">
+                        <p className="font-medium">
+                          Cet élève sera Non Classé pour {unrankedPeriods.length} séquence(s)
+                        </p>
+                        <p className="text-xs mt-1">
+                          Séquences NC:{" "}
+                          {periods
+                            .filter((p) => unrankedPeriods.includes(p.id))
+                            .map((p) => p.name)
+                            .join(", ")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        )}
+            )}
+          </CardContent>
+        </Card>
 
         {/* Affectation */}
         <Card>
