@@ -8,7 +8,6 @@ import { PerformanceChart } from "@/components/dashboard/performance-chart"
 import { DistributionChart } from "@/components/dashboard/distribution-chart"
 import { TopStudents } from "@/components/dashboard/top-students"
 import { getDashboardStats, getSchoolSettings } from "@/lib/services/data-service"
-import { Users, GraduationCap, BookOpen, UserCheck, TrendingUp, Award } from "lucide-react"
 
 export default async function DashboardPage() {
   let stats = {
@@ -43,18 +42,24 @@ export default async function DashboardPage() {
           value={stats.totalStudents}
           change={5.2}
           changeLabel="vs année précédente"
-          icon={Users}
+          iconName="Users"
           delay={0}
         />
-        <StatCard title="Classes Actives" value={stats.totalClasses} change={2} icon={GraduationCap} delay={100} />
-        <StatCard title="Matières" value={stats.totalSubjects} icon={BookOpen} delay={200} />
-        <StatCard title="Enseignants" value={stats.totalTeachers} change={8} icon={UserCheck} delay={300} />
-        <StatCard title="Taux de Réussite" value={`${stats.passRate}%`} change={3.5} icon={TrendingUp} delay={400} />
+        <StatCard title="Classes Actives" value={stats.totalClasses} change={2} iconName="GraduationCap" delay={100} />
+        <StatCard title="Matières" value={stats.totalSubjects} iconName="BookOpen" delay={200} />
+        <StatCard title="Enseignants" value={stats.totalTeachers} change={8} iconName="UserCheck" delay={300} />
+        <StatCard
+          title="Taux de Réussite"
+          value={`${stats.passRate}%`}
+          change={3.5}
+          iconName="TrendingUp"
+          delay={400}
+        />
         <StatCard
           title="Moyenne Générale"
           value={stats.schoolAverage.toFixed(2)}
           change={0.8}
-          icon={Award}
+          iconName="Award"
           delay={500}
         />
       </div>

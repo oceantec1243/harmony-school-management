@@ -1,14 +1,32 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { type LucideIcon, TrendingUp, TrendingDown } from "lucide-react"
+import {
+  TrendingUp,
+  TrendingDown,
+  Users,
+  GraduationCap,
+  BookOpen,
+  UserCheck,
+  Award,
+  type LucideIcon,
+} from "lucide-react"
+
+const iconMap: Record<string, LucideIcon> = {
+  Users,
+  GraduationCap,
+  BookOpen,
+  UserCheck,
+  TrendingUp,
+  Award,
+}
 
 interface StatCardProps {
   title: string
   value: string | number
   change?: number
   changeLabel?: string
-  icon: LucideIcon
+  iconName: string
   iconColor?: string
   delay?: number
 }
@@ -18,12 +36,13 @@ export function StatCard({
   value,
   change,
   changeLabel,
-  icon: Icon,
+  iconName,
   iconColor = "text-primary",
   delay = 0,
 }: StatCardProps) {
   const isPositive = change && change > 0
   const isNegative = change && change < 0
+  const Icon = iconMap[iconName] || Users
 
   return (
     <div
