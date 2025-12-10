@@ -340,39 +340,71 @@ export default function GradesPage() {
   }
 
   const handleSaveGrades = async () => {
-    if (!selectedSubject || selectedSequences.length === 0) return
+    if (!selectedSubject || selectedSequences.length === 0) {
+      toast.error("Veuillez sélectionner une matière et au moins une séquence")
+      return
+    }
 
     setSaving(true)
+    setProgress(0)
+
     try {
-      const gradesToSave: { student_id: string; subject_id: string; period_id: string; score: number }[] = []
+      const gradesToSave: { student_id: string; subject_id: string; academic_period_id: string; score: number }[] = []
 
       Object.entries(grades).forEach(([studentId, sequences]) => {
         Object.entries(sequences).forEach(([sequenceId, subjects]) => {
           const score = subjects[selectedSubject]
-          if (score !== null && score !== undefined) {
+          if (score !== null && score !== undefined && !isNaN(score)) {
             gradesToSave.push({
               student_id: studentId,
               subject_id: selectedSubject,
-              period_id: sequenceId,
-              score,
+              academic_period_id: sequenceId, // Changed from period_id
+              score: Number(score),
             })
           }
         })
       })
 
-      let savedCount = 0
-      for (const grade of gradesToSave) {
-        await supabase.from("grades").upsert(grade, {
-          onConflict: "student_id,subject_id,period_id",
-        })
-        savedCount++
-        setProgress(Math.round((savedCount / gradesToSave.length) * 100))
+      if (gradesToSave.length === 0) {
+        toast.warning("Aucune note à enregistrer. Veuillez saisir au moins une note.")
+        setSaving(false)
+        return
       }
 
-      toast.success(`${savedCount} notes enregistrées avec succès`)
+      let savedCount = 0
+      let errorCount = 0
+
+      for (const grade of gradesToSave) {
+        const { error } = await supabase.from("grades").upsert(grade, {
+          onConflict: "student_id,subject_id,academic_period_id",
+        })
+
+        if (error) {
+          console.error("[v0] Error saving grade:", error.message)
+          errorCount++
+        } else {
+          savedCount++
+        }
+
+        setProgress(Math.round(((savedCount + errorCount) / gradesToSave.length) * 100))
+      }
+
+      if (errorCount > 0) {
+        toast.warning(`${savedCount} notes enregistrées, ${errorCount} erreurs`)
+      } else {
+        toast.success(
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold">Enregistrement réussi!</span>
+            <span>
+              {savedCount} note{savedCount > 1 ? "s" : ""} enregistrée{savedCount > 1 ? "s" : ""} avec succès dans la
+              base de données.
+            </span>
+          </div>,
+        )
+      }
     } catch (error) {
-      console.error("Error saving grades:", error)
-      toast.error("Erreur lors de l'enregistrement des notes")
+      console.error("[v0] Error:", error)
+      toast.error("Une erreur est survenue lors de l'enregistrement")
     } finally {
       setSaving(false)
       setProgress(0)
