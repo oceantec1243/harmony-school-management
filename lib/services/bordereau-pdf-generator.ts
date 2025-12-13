@@ -117,7 +117,7 @@ export async function generateBordereauPDF(
   const headerHeight = 42
   const infoHeight = 18
   const tableHeaderHeight = 12
-  const footerHeight = 12
+  const footerHeight = 15
   const availableTableHeight = pageHeight - headerHeight - infoHeight - tableHeaderHeight - footerHeight - margin * 2
   const rowHeight = Math.min(8, Math.max(5, availableTableHeight / Math.max(numStudents + 1, 1)))
 
@@ -580,51 +580,78 @@ export async function generateBordereauPDF(
   const minutes = now.getMinutes().toString().padStart(2, "0")
   const seconds = now.getSeconds().toString().padStart(2, "0")
 
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(7)
-  pdf.setFont("helvetica", "normal")
-  const footerText = `Bordereau généré le ${day}/${month}/${year} à ${hours}:${minutes}:${seconds} par HARMONY - Développé par OceanTechnologie`
-  pdf.text(footerText, pageWidth / 2, pageHeight - 5, { align: "center" })
+  const footerY = pageHeight - 15
+
+  // Footer background
+  pdf.setFillColor(15, 23, 42)
+  pdf.rect(0, footerY, pageWidth, 15, "F")
+
+  // Main footer text
+  pdf.setTextColor(226, 232, 240)
+  pdf.setFontSize(6)
+  pdf.setFont("courier", "normal")
+  pdf.text(
+    `Bordereau généré le ${day}/${month}/${year} à ${hours}:${minutes}:${seconds} par HARMONY`,
+    pageWidth / 2,
+    footerY + 4,
+    { align: "center" },
+  )
+
+  // Company info
+  pdf.setTextColor(148, 163, 184)
+  pdf.setFontSize(5)
+  pdf.text(
+    "Développé par OceanTechnologie | oceantechnologie6@gmail.com | oceantechnologie6.netlify.app",
+    pageWidth / 2,
+    footerY + 8,
+    { align: "center" },
+  )
+
+  pdf.setFontSize(4.5)
+  pdf.text("Tél: +237 679-122-367 / +237 653-517-605", pageWidth / 2, footerY + 11, { align: "center" })
+
+  // Slogan
+  pdf.setTextColor(96, 165, 250)
+  pdf.setFontSize(5)
+  pdf.setFont("courier", "italic")
+  pdf.text('"Where ideas turn into reality"', pageWidth / 2, footerY + 14, { align: "center" })
 
   // ===== LEGEND =====
-  const legendY = pageHeight - 12
-  pdf.setFontSize(6)
+  const legendY = footerY - 6
+  pdf.setFontSize(5)
   pdf.setFont("helvetica", "normal")
-  pdf.setTextColor(100, 116, 139)
-  pdf.text("Légende: ", margin, legendY)
+  pdf.setTextColor(71, 85, 105)
+  pdf.text("Légende:", margin, legendY)
 
-  // Color legend
-  let legendX = margin + 15
-  pdf.setFillColor(254, 242, 242)
-  pdf.rect(legendX, legendY - 3, 4, 4, "F")
-  pdf.setTextColor(220, 38, 38)
-  pdf.text("0-9", legendX + 5, legendY)
+  let legendX = margin + 18
+  const legendBoxSize = 3
 
-  legendX += 15
-  pdf.setFillColor(255, 251, 235)
-  pdf.rect(legendX, legendY - 3, 4, 4, "F")
-  pdf.setTextColor(245, 158, 11)
-  pdf.text("10-11", legendX + 5, legendY)
-
-  legendX += 15
-  pdf.setFillColor(239, 246, 255)
-  pdf.rect(legendX, legendY - 3, 4, 4, "F")
-  pdf.setTextColor(37, 99, 235)
-  pdf.text("12-14", legendX + 5, legendY)
-
-  legendX += 15
-  pdf.setFillColor(240, 253, 244)
-  pdf.rect(legendX, legendY - 3, 4, 4, "F")
-  pdf.setTextColor(22, 163, 74)
-  pdf.text("15-20", legendX + 5, legendY)
-
+  // Red
+  pdf.setFillColor(220, 38, 38)
+  pdf.rect(legendX, legendY - 2, legendBoxSize, legendBoxSize, "F")
+  pdf.text("0-9", legendX + legendBoxSize + 2, legendY)
   legendX += 18
-  pdf.setFillColor(255, 237, 213)
-  pdf.rect(legendX, legendY - 3, 4, 4, "F")
-  pdf.setTextColor(194, 65, 12)
-  pdf.text("NC = Non Classé", legendX + 5, legendY)
 
-  // Save PDF
-  const filename = `Bordereau_${reportData.class.name}_${reportData.period.name}.pdf`
-  pdf.save(filename)
+  // Orange
+  pdf.setFillColor(245, 158, 11)
+  pdf.rect(legendX, legendY - 2, legendBoxSize, legendBoxSize, "F")
+  pdf.text("10-11", legendX + legendBoxSize + 2, legendY)
+  legendX += 20
+
+  // Blue
+  pdf.setFillColor(37, 99, 235)
+  pdf.rect(legendX, legendY - 2, legendBoxSize, legendBoxSize, "F")
+  pdf.text("12-14", legendX + legendBoxSize + 2, legendY)
+  legendX += 20
+
+  // Green
+  pdf.setFillColor(22, 163, 74)
+  pdf.rect(legendX, legendY - 2, legendBoxSize, legendBoxSize, "F")
+  pdf.text("15-20", legendX + legendBoxSize + 2, legendY)
+
+  // Download PDF
+  const fileName = `Bordereau_${reportData.class.name}_${reportData.period.name}.pdf`
+  pdf.save(fileName)
 }
+
+export type { ReportData, SchoolSettings, Subject, StudentReport }

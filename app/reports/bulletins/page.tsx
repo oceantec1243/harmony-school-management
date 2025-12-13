@@ -28,6 +28,7 @@ type Student = {
   class_id: string
   class?: { name: string }
   is_ranked?: boolean
+  photo?: string | null
 }
 
 type ClassType = { id: string; name: string; level_id: string }
@@ -58,6 +59,8 @@ type BulletinData = {
   classSize: number
   classAverage: number
   isUnranked?: boolean
+  attendance?: any
+  section?: string // Added for section
 }
 
 // Helper functions
@@ -156,7 +159,7 @@ export default function BulletinsPage() {
       const { data: studentsData } = await supabase
         .from("students")
         .select(
-          "id, matricule, first_name, last_name, date_of_birth, place_of_birth, gender, class_id, is_ranked, class:classes(*, level:levels(*), section:sections(*))",
+          "id, matricule, first_name, last_name, date_of_birth, place_of_birth, gender, class_id, is_ranked, class:classes(*, level:levels(*), section:sections(*)), photo",
         )
         .eq("class_id", selectedClass)
         .ilike("status", "active")
@@ -204,6 +207,24 @@ export default function BulletinsPage() {
         const { data: period } = await supabase.from("academic_periods").select("*").eq("id", selectedPeriod).single()
 
         if (!period) throw new Error("Période non trouvée")
+
+        let attendanceData: any = undefined
+        if (period.type === "trimester") {
+          const { data: attendance } = await supabase
+            .from("attendances")
+            .select("*")
+            .eq("student_id", studentId)
+            .eq("academic_period_id", selectedPeriod)
+            .maybeSingle()
+
+          if (attendance) {
+            attendanceData = {
+              total_hours: attendance.total_hours || 0,
+              justified_hours: attendance.justified_hours || 0,
+              unjustified_hours: attendance.unjustified_hours || 0,
+            }
+          }
+        }
 
         // Check if student is unranked for this period
         const { data: unrankedData } = await supabase
@@ -280,7 +301,7 @@ export default function BulletinsPage() {
         // Get all students in class for ranking
         const { data: classStudents } = await supabase
           .from("students")
-          .select("id, is_ranked")
+          .select("id, is_ranked, photo")
           .eq("class_id", classId)
           .ilike("status", "active")
 
@@ -505,6 +526,8 @@ export default function BulletinsPage() {
           classSize: rankedAverages.length,
           classAverage,
           isUnranked,
+          attendance: attendanceData,
+          section: student.class?.section?.name, // Added section
         }
       } catch (error) {
         console.error("Error generating bulletin data:", error)
@@ -543,10 +566,76 @@ export default function BulletinsPage() {
   )
 
   const handleDownloadPDF = async () => {
-    if (!bulletinData) return
+    // Ensure we have bulletin data before proceeding
+    if (!bulletinData) {
+      toast.error("Aucune donnée de bulletin à télécharger.")
+      return
+    }
+
     setDownloading(true)
     try {
-      await generateBulletinPDF(bulletinData, schoolSettings)
+      const pdfData = {
+        student: {
+          first_name: bulletinData.student.first_name,
+          last_name: bulletinData.student.last_name,
+          matricule: bulletinData.student.matricule || "",
+          date_of_birth: bulletinData.student.date_of_birth || "",
+          place_of_birth: bulletinData.student.place_of_birth || "",
+          gender: bulletinData.student.gender || "",
+          photo: bulletinData.student.photo || "", // Added photo
+          isRanked: !bulletinData.isUnranked, // Added isRanked
+        },
+        class: {
+          name: bulletinData.student.class?.name || "",
+        },
+        period: {
+          name: bulletinData.period?.name || "",
+          type: bulletinData.period?.type || "sequence",
+          academic_year: schoolSettings?.current_academic_year || "2024-2025",
+        },
+        attendance: bulletinData.attendance,
+        subjects: bulletinData.subjects.map((s: any) => ({
+          id: s.id, // Added subject ID
+          name: s.name,
+          teacher: s.teacher_name || "",
+          coefficient: s.coefficient || 1,
+          score1: bulletinData.sequenceGrades?.seq1?.[s.id],
+          score2: bulletinData.sequenceGrades?.seq2?.[s.id],
+          average: bulletinData.grades?.[s.id]?.score || 0,
+          group: s.group_name || "",
+          rank: bulletinData.subjectRanks?.[s.id]?.rank,
+          classSize: bulletinData.subjectRanks?.[s.id]?.classSize,
+        })),
+        average: bulletinData.average || 0,
+        rank: bulletinData.isUnranked ? "NC" : bulletinData.rank || 1,
+        classSize: bulletinData.classSize || 1,
+        classAverage: bulletinData.classAverage || 0,
+        appreciation: getAppreciation(bulletinData.average || 0),
+        distinction: getDistinction(bulletinData.average || 0),
+        schoolSettings: {
+          school_name: schoolSettings?.school_name || "HARMONY School",
+          school_slogan: schoolSettings?.school_slogan || "",
+          address: schoolSettings?.address || "",
+          phone: schoolSettings?.phone || "",
+          email: schoolSettings?.email || "",
+          logo_url: schoolSettings?.logo_url || "",
+          po_box: schoolSettings?.po_box || "",
+          current_academic_year: schoolSettings?.current_academic_year || "2024-2025",
+        },
+        section: bulletinData.section || "", // Added section
+        schoolInfo: {
+          poBox: schoolSettings?.po_box || "",
+          logo: schoolSettings?.logo_url || "",
+        },
+        // Added missing fields that might be expected by generateBulletinPDF
+        className: bulletinData.student.class?.name || "",
+        periodName: bulletinData.period.name,
+        periodType: bulletinData.period.type,
+        // Assuming 'periods' is an array of period objects, adjust if needed
+        periods: [bulletinData.period], // Pass the current period in an array
+      }
+
+      await generateBulletinPDF(pdfData as any) // Cast to any to bypass potential type issues if pdfData is not perfectly typed
       toast.success("PDF téléchargé avec succès!")
     } catch (error) {
       console.error("Error downloading PDF:", error)
@@ -566,12 +655,59 @@ export default function BulletinsPage() {
     toast.info("Génération des bulletins en cours...")
 
     try {
-      const bulletinsData: BulletinData[] = []
+      const bulletinsData: any[] = []
 
       for (const student of students) {
         const data = await generateBulletinDataForStudent(student.id)
         if (data) {
-          bulletinsData.push(data)
+          const pdfData = {
+            schoolName: schoolSettings?.school_name || "HARMONY School",
+            schoolSlogan: schoolSettings?.school_slogan || "L'excellence au service de l'éducation",
+            schoolAddress: schoolSettings?.address || "",
+            schoolPhone: schoolSettings?.phone || "",
+            schoolEmail: schoolSettings?.email || "",
+            logoUrl: schoolSettings?.logo_url || "",
+            academicYear: schoolSettings?.current_academic_year || "2024-2025",
+            className: data.student.class?.name || "",
+            // Assuming section and level are available in schoolSettings or student data if needed
+            // section: "Francophone",
+            // level: "Moyenne",
+            periodName: data.period.name,
+            periodType: data.period.type,
+            student: {
+              id: data.student.id,
+              firstName: data.student.first_name,
+              lastName: data.student.last_name,
+              matricule: data.student.matricule || "",
+              dateOfBirth: data.student.date_of_birth || "",
+              placeOfBirth: data.student.place_of_birth || "",
+              gender: data.student.gender || "",
+              photo: data.student.photo || "",
+              isRanked: !data.isUnranked,
+            },
+            subjects: data.subjects.map((s) => ({
+              id: s.id,
+              name: s.name,
+              teacher: s.teacher_name,
+              coefficient: s.coefficient,
+              score1: data.sequenceGrades?.seq1[s.id],
+              score2: data.sequenceGrades?.seq2[s.id],
+              average: data.grades[s.id]?.score || 0,
+              group: s.group_name,
+              rank: data.subjectRanks?.[s.id]?.rank,
+              classSize: data.subjectRanks?.[s.id]?.classSize,
+            })),
+            average: data.average,
+            rank: data.isUnranked ? "NC" : data.rank,
+            classSize: data.classSize,
+            classAverage: data.classAverage,
+            appreciation: getAppreciation(data.average),
+            distinction: getDistinction(data.average),
+            attendance: data.attendance,
+            periods: [data.period],
+            section: data.section, // Added section
+          }
+          bulletinsData.push(pdfData)
         }
       }
 
@@ -583,7 +719,7 @@ export default function BulletinsPage() {
       const className = classes.find((c) => c.id === selectedClass)?.name || "Classe"
       const periodName = periods.find((p) => p.id === selectedPeriod)?.name || "Période"
 
-      await generateClassBulletinsPDF(bulletinsData, schoolSettings, className, periodName)
+      await generateClassBulletinsPDF(bulletinsData, className, periodName)
       toast.success(`${bulletinsData.length} bulletins générés avec succès!`)
     } catch (error) {
       console.error("Error mass generating bulletins:", error)
@@ -727,7 +863,7 @@ export default function BulletinsPage() {
                     <StudentAvatar
                       firstName={student.first_name}
                       lastName={student.last_name}
-                      photoUrl={undefined}
+                      photoUrl={student.photo || undefined}
                       size="sm"
                     />
                     <div className="flex-1 min-w-0">
@@ -814,6 +950,12 @@ export default function BulletinsPage() {
                   <p className="text-sm text-muted-foreground">Effectif</p>
                   <p className="font-semibold">{bulletinData.classSize} élèves</p>
                 </div>
+                {bulletinData.section && ( // Display Section if available
+                  <div>
+                    <p className="text-sm text-muted-foreground">Section</p>
+                    <p className="font-semibold">{bulletinData.section}</p>
+                  </div>
+                )}
               </div>
 
               {/* Grades Table */}
@@ -966,6 +1108,24 @@ export default function BulletinsPage() {
                   <p className="text-sm font-bold mt-2">{getDistinction(bulletinData.average)}</p>
                 </div>
               </div>
+
+              {/* Attendance Summary */}
+              {bulletinData.period.type === "trimester" && bulletinData.attendance && (
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="bg-green-500 text-white p-4 rounded-lg text-center">
+                    <p className="text-xs opacity-80">Total Heures</p>
+                    <p className="text-2xl font-bold">{bulletinData.attendance.total_hours}</p>
+                  </div>
+                  <div className="bg-blue-500 text-white p-4 rounded-lg text-center">
+                    <p className="text-xs opacity-80">Heures Justifiées</p>
+                    <p className="text-2xl font-bold">{bulletinData.attendance.justified_hours}</p>
+                  </div>
+                  <div className="bg-red-500 text-white p-4 rounded-lg text-center">
+                    <p className="text-xs opacity-80">Heures Non Justifiées</p>
+                    <p className="text-2xl font-bold">{bulletinData.attendance.unjustified_hours}</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </DialogContent>

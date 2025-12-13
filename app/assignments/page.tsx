@@ -16,7 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Plus, Users, BookOpen, GraduationCap, Trash2, UserCheck, Building, Layers } from "lucide-react"
+import { Plus, Users, BookOpen, GraduationCap, Trash2, UserCheck, Building, Layers, UserPlus } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 
@@ -48,10 +48,12 @@ type ClassSubject = {
 type LevelSubject = {
   id: string
   level_id: string
-  subject_id: string
   section_id: string
+  subject_id: string
   coefficient: number
+  teacher_id: string | null
   subject?: Subject
+  teacher?: Teacher
 }
 
 export default function AssignmentsPage() {
@@ -76,6 +78,12 @@ export default function AssignmentsPage() {
   const [assignTeacherDialogOpen, setAssignTeacherDialogOpen] = useState(false)
   const [levelSubjectsDialogOpen, setLevelSubjectsDialogOpen] = useState(false)
 
+  const [levelTeacherAssignment, setLevelTeacherAssignment] = useState({
+    level_subject_id: "",
+    teacher_id: "",
+  })
+  const [assignLevelTeacherDialogOpen, setAssignLevelTeacherDialogOpen] = useState(false)
+
   // Forms
   const [classForm, setClassForm] = useState({
     name: "",
@@ -94,6 +102,9 @@ export default function AssignmentsPage() {
     class_subject_id: "",
     teacher_id: "",
   })
+
+  // Local state for filtered level subjects
+  const [currentLevelSubjects, setCurrentLevelSubjects] = useState<LevelSubject[]>([])
 
   const supabase = createClient()
 
@@ -117,7 +128,7 @@ export default function AssignmentsPage() {
         supabase.from("subjects").select("*").order("name"),
         supabase.from("subject_groups").select("*").order("order"),
         supabase.from("class_subjects").select("*, subject:subjects(*), teacher:teachers(*)"),
-        supabase.from("level_subjects").select("*, subject:subjects(*)"),
+        supabase.from("level_subjects").select("*, subject:subjects(*), teacher:teachers(*)"),
       ])
 
       setSections(sectionsRes.data || [])
@@ -151,10 +162,21 @@ export default function AssignmentsPage() {
 
   const currentClassSubjects = selectedClass ? classSubjects.filter((cs) => cs.class_id === selectedClass) : []
 
-  const currentLevelSubjects =
-    selectedLevel && selectedSection
-      ? levelSubjects.filter((ls) => ls.level_id === selectedLevel && ls.section_id === selectedSection)
-      : []
+  // Update currentLevelSubjects based on selected section and level
+  useEffect(() => {
+    if (selectedSection && selectedSection !== "all" && selectedLevel && selectedLevel !== "all") {
+      const filtered = levelSubjects.filter((ls) => ls.section_id === selectedSection && ls.level_id === selectedLevel)
+      console.log("[v0] Filtering level subjects:", {
+        selectedSection,
+        selectedLevel,
+        totalLevelSubjects: levelSubjects.length,
+        filteredCount: filtered.length,
+      })
+      setCurrentLevelSubjects(filtered)
+    } else {
+      setCurrentLevelSubjects([])
+    }
+  }, [selectedSection, selectedLevel, levelSubjects])
 
   // Get subjects for the selected section
   const sectionSubjects = subjects.filter((s) => {
@@ -323,6 +345,28 @@ export default function AssignmentsPage() {
 
       if (error) throw error
       toast.success("Professeur principal mis à jour")
+      fetchData()
+    } catch (error: any) {
+      toast.error(error.message || "Erreur")
+    }
+  }
+
+  const handleAssignLevelTeacher = async () => {
+    if (!levelTeacherAssignment.level_subject_id || !levelTeacherAssignment.teacher_id) {
+      toast.error("Sélectionnez un enseignant")
+      return
+    }
+
+    try {
+      const { error } = await supabase
+        .from("level_subjects")
+        .update({ teacher_id: levelTeacherAssignment.teacher_id })
+        .eq("id", levelTeacherAssignment.level_subject_id)
+
+      if (error) throw error
+      toast.success("Enseignant assigné au tronc commun")
+      setAssignLevelTeacherDialogOpen(false)
+      setLevelTeacherAssignment({ level_subject_id: "", teacher_id: "" })
       fetchData()
     } catch (error: any) {
       toast.error(error.message || "Erreur")
@@ -705,23 +749,40 @@ export default function AssignmentsPage() {
                       <TableRow>
                         <TableHead>Matière</TableHead>
                         <TableHead>Coefficient</TableHead>
-                        <TableHead className="w-12"></TableHead>
+                        <TableHead>Enseignant</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {currentLevelSubjects.map((ls) => (
                         <TableRow key={ls.id}>
                           <TableCell className="font-medium">{ls.subject?.name}</TableCell>
+                          <TableCell>{ls.coefficient}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">{ls.coefficient}</Badge>
+                            {ls.teacher ? (
+                              <span className="text-sm">
+                                {ls.teacher.first_name} {ls.teacher.last_name}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-sm italic">Non assigné</span>
+                            )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="text-right space-x-2">
                             <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 text-destructive"
-                              onClick={() => handleRemoveLevelSubject(ls.id)}
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setLevelTeacherAssignment({
+                                  level_subject_id: ls.id,
+                                  teacher_id: ls.teacher_id || "",
+                                })
+                                setAssignLevelTeacherDialogOpen(true)
+                              }}
                             >
+                              <UserPlus className="h-4 w-4 mr-1" />
+                              {ls.teacher ? "Changer" : "Assigner"}
+                            </Button>
+                            <Button size="sm" variant="destructive" onClick={() => handleRemoveLevelSubject(ls.id)}>
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </TableCell>
@@ -1064,6 +1125,38 @@ export default function AssignmentsPage() {
           </Dialog>
         </TabsContent>
       </Tabs>
+
+      <Dialog open={assignLevelTeacherDialogOpen} onOpenChange={setAssignLevelTeacherDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assigner un enseignant (Tronc Commun)</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Enseignant</Label>
+              <Select
+                value={levelTeacherAssignment.teacher_id}
+                onValueChange={(value) => setLevelTeacherAssignment({ ...levelTeacherAssignment, teacher_id: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Sélectionner" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teachers.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.first_name} {t.last_name}
+                      {t.specialization && ` - ${t.specialization}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button onClick={handleAssignLevelTeacher} className="w-full">
+              Assigner
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppLayout>
   )
 }
