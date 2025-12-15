@@ -26,7 +26,7 @@ type Student = {
   place_of_birth: string | null
   gender: string
   class_id: string
-  class?: { name: string }
+  class?: { name: string; section?: { name: string }; level_id?: string }
   is_ranked?: boolean
   photo?: string | null
 }
@@ -59,7 +59,11 @@ type BulletinData = {
   classSize: number
   classAverage: number
   isUnranked?: boolean
-  attendance?: any
+  attendance?: {
+    total_hours: number
+    justified_hours: number
+    unjustified_hours: number
+  }
   section?: string // Added for section
 }
 
@@ -193,129 +197,117 @@ export default function BulletinsPage() {
       s.matricule.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  const generateBulletinDataForStudent = useCallback(
+  const generateBulletinData = useCallback(
     async (studentId: string, allClassGrades?: any[]): Promise<BulletinData | null> => {
+      if (!selectedClass || !selectedPeriod) return null
+
       try {
-        const { data: student, error: studentError } = await supabase
+        const { data: student } = await supabase
           .from("students")
-          .select("*, class:classes(*, level:levels(*), section:sections(*))")
+          .select("*, class:classes(*, section:sections(name), level:levels(name))")
           .eq("id", studentId)
           .single()
 
-        if (studentError || !student) throw new Error("Élève non trouvé")
+        if (!student) return null
 
-        const { data: period } = await supabase.from("academic_periods").select("*").eq("id", selectedPeriod).single()
+        const period = periods.find((p) => p.id === selectedPeriod)
+        if (!period) return null
 
-        if (!period) throw new Error("Période non trouvée")
+        const isTrimestriel = period.type === "trimester"
 
-        let attendanceData: any = undefined
-        if (period.type === "trimester") {
-          const { data: attendance } = await supabase
-            .from("attendances")
-            .select("*")
-            .eq("student_id", studentId)
-            .eq("academic_period_id", selectedPeriod)
+        // Fetch subjects
+        const classId = student.class_id
+        const levelId = student.class?.level_id
+
+        const [classSubjectsRes, levelSubjectsRes] = await Promise.all([
+          supabase
+            .from("class_subjects")
+            .select("*, subject:subjects(*, group:subject_groups(name)), teacher:teachers(first_name, last_name)")
+            .eq("class_id", classId),
+          supabase
+            .from("level_subjects")
+            .select("*, subject:subjects(*, group:subject_groups(name)), teacher:teachers(first_name, last_name)")
+            .eq("level_id", levelId),
+        ])
+
+        const subjects: Subject[] = []
+        const addedSubjectIds = new Set<string>()
+
+        for (const cs of classSubjectsRes.data || []) {
+          if (cs.subject && !addedSubjectIds.has(cs.subject.id)) {
+            subjects.push({
+              id: cs.subject.id,
+              name: cs.subject.name,
+              coefficient: cs.coefficient || 1,
+              group_name: cs.subject.group?.name || "Autres",
+              teacher_name: cs.teacher ? `${cs.teacher.first_name} ${cs.teacher.last_name}` : undefined,
+            })
+            addedSubjectIds.add(cs.subject.id)
+          }
+        }
+
+        for (const ls of levelSubjectsRes.data || []) {
+          if (ls.subject && !addedSubjectIds.has(ls.subject.id)) {
+            subjects.push({
+              id: ls.subject.id,
+              name: ls.subject.name,
+              coefficient: ls.coefficient || 1,
+              group_name: ls.subject.group?.name || "Autres",
+              teacher_name: ls.teacher ? `${ls.teacher.first_name} ${ls.teacher.last_name}` : undefined,
+            })
+            addedSubjectIds.add(ls.subject.id)
+          }
+        }
+
+        let attendanceData: { total_hours: number; justified_hours: number; unjustified_hours: number } | undefined
+
+        // For trimester, fetch attendance for that trimester
+        // For sequence, find the parent trimester and fetch attendance
+        let attendancePeriodId = selectedPeriod
+
+        if (period.type === "sequence" && period.number) {
+          // Find the parent trimester for this sequence
+          const trimesterNumber = Math.ceil(period.number / 2)
+          const { data: trimesterPeriod } = await supabase
+            .from("academic_periods")
+            .select("id")
+            .eq("type", "trimester")
+            .eq("number", trimesterNumber)
+            .eq("academic_year", period.academic_year)
             .maybeSingle()
 
-          if (attendance) {
-            attendanceData = {
-              total_hours: attendance.total_hours || 0,
-              justified_hours: attendance.justified_hours || 0,
-              unjustified_hours: attendance.unjustified_hours || 0,
-            }
+          if (trimesterPeriod) {
+            attendancePeriodId = trimesterPeriod.id
           }
         }
 
-        // Check if student is unranked for this period
-        const { data: unrankedData } = await supabase
-          .from("student_unranked_periods")
-          .select("id")
+        const { data: attendance } = await supabase
+          .from("attendances")
+          .select("*")
           .eq("student_id", studentId)
-          .eq("academic_period_id", selectedPeriod)
+          .eq("academic_period_id", attendancePeriodId)
           .maybeSingle()
 
-        const isUnranked = !!unrankedData || student.is_ranked === false
-
-        const levelId = student.class?.level_id
-        const classId = student.class_id
-        const isTrimestriel = bulletinType === "trimester"
-
-        // Fetch class subjects with teachers
-        const { data: classSubjectsData } = await supabase
-          .from("class_subjects")
-          .select(
-            "id, subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(id, name))",
-          )
-          .eq("class_id", classId)
-
-        // Fetch level subjects
-        let levelSubjectsData: any[] = []
-        if (levelId) {
-          const { data } = await supabase
-            .from("level_subjects")
-            .select(
-              "id, subject_id, coefficient, subject:subjects(id, name, code, subject_group:subject_groups(id, name))",
-            )
-            .eq("level_id", levelId)
-          levelSubjectsData = data || []
-        }
-
-        // Combine subjects with teacher names
-        const subjectsMap = new Map<string, Subject>()
-
-        if (classSubjectsData) {
-          for (const cs of classSubjectsData) {
-            if (cs.subject && cs.subject_id) {
-              const subj = cs.subject as any
-              const teacher = cs.teacher as any
-              subjectsMap.set(cs.subject_id, {
-                id: cs.subject_id,
-                name: subj.name || "",
-                code: subj.code || "",
-                coefficient: cs.coefficient || 1,
-                group_name: subj.subject_group?.name || "Autres",
-                teacher_name: teacher ? `${teacher.first_name || ""} ${teacher.last_name || ""}`.trim() : undefined,
-              })
-            }
+        if (attendance) {
+          attendanceData = {
+            total_hours: attendance.total_hours || 0,
+            justified_hours: attendance.justified_hours || 0,
+            unjustified_hours: (attendance.total_hours || 0) - (attendance.justified_hours || 0),
           }
         }
 
-        for (const ls of levelSubjectsData) {
-          if (ls.subject && ls.subject_id && !subjectsMap.has(ls.subject_id)) {
-            const subj = ls.subject as any
-            subjectsMap.set(ls.subject_id, {
-              id: ls.subject_id,
-              name: subj.name || "",
-              code: subj.code || "",
-              coefficient: ls.coefficient || 1,
-              group_name: subj.subject_group?.name || "Autres",
-              teacher_name: teachersMap[ls.subject_id] || undefined,
-            })
-          }
-        }
-
-        const subjects = Array.from(subjectsMap.values()).sort(
-          (a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name),
-        )
-
-        // Get all students in class for ranking
+        // Fetch class students for ranking
         const { data: classStudents } = await supabase
           .from("students")
-          .select("id, is_ranked, photo")
+          .select("id")
           .eq("class_id", classId)
           .ilike("status", "active")
-
-        // Filter out unranked students for ranking calculations
-        const rankedStudentIds = (classStudents || []).filter((s) => s.is_ranked !== false).map((s) => s.id)
 
         const allStudentIds = (classStudents || []).map((s) => s.id)
         const subjectIds = subjects.map((s) => s.id)
 
         const grades: Record<string, { score: number; coefficient: number }> = {}
         let sequenceGrades: { seq1: Record<string, number>; seq2: Record<string, number> } | undefined
-
-        // Use provided grades or fetch them
-        let allGrades = allClassGrades
 
         if (isTrimestriel && period.number) {
           const seq1Num = (period.number - 1) * 2 + 1
@@ -359,6 +351,7 @@ export default function BulletinsPage() {
             }
           }
 
+          // Calculate trimester average from sequence grades
           subjects.forEach((subject) => {
             const s1 = sequenceGrades!.seq1[subject.id]
             const s2 = sequenceGrades!.seq2[subject.id]
@@ -367,151 +360,250 @@ export default function BulletinsPage() {
               grades[subject.id] = { score: avg, coefficient: subject.coefficient }
             }
           })
-
-          // Fetch all grades for ranking
-          if (!allGrades) {
-            const periodIds = (seqPeriods || []).map((p) => p.id)
-            if (periodIds.length > 0 && allStudentIds.length > 0 && subjectIds.length > 0) {
-              const { data } = await supabase
-                .from("grades")
-                .select("student_id, subject_id, score, academic_period_id")
-                .in("student_id", allStudentIds)
-                .in("subject_id", subjectIds)
-                .in("academic_period_id", periodIds)
-              allGrades = data || []
-            }
-          }
         } else {
-          // Simple sequence
-          if (subjectIds.length > 0) {
-            const { data: gradesData } = await supabase
+          // Sequence bulletin - fetch grades directly
+          let studentGrades = allClassGrades?.filter((g) => g.student_id === studentId)
+
+          if (!studentGrades) {
+            const { data } = await supabase
               .from("grades")
-              .select("student_id, subject_id, score")
+              .select("*")
               .eq("student_id", studentId)
               .in("subject_id", subjectIds)
               .eq("academic_period_id", selectedPeriod)
 
-            for (const g of gradesData || []) {
-              const subject = subjects.find((s) => s.id === g.subject_id)
-              if (subject) {
-                grades[g.subject_id] = { score: g.score, coefficient: subject.coefficient }
-              }
-            }
+            studentGrades = data || []
           }
 
-          // Fetch all grades for ranking
-          if (!allGrades && allStudentIds.length > 0 && subjectIds.length > 0) {
-            const { data } = await supabase
-              .from("grades")
-              .select("student_id, subject_id, score")
-              .in("student_id", allStudentIds)
-              .in("subject_id", subjectIds)
-              .eq("academic_period_id", selectedPeriod)
-            allGrades = data || []
+          for (const g of studentGrades) {
+            const subject = subjects.find((s) => s.id === g.subject_id)
+            if (subject) {
+              grades[g.subject_id] = { score: g.score, coefficient: subject.coefficient }
+            }
           }
         }
 
+        // Calculate average
+        let totalPoints = 0
+        let totalCoef = 0
+        for (const [subjectId, grade] of Object.entries(grades)) {
+          if (grade.score !== undefined && !isNaN(grade.score)) {
+            totalPoints += grade.score * grade.coefficient
+            totalCoef += grade.coefficient
+          }
+        }
+        const average = totalCoef > 0 ? totalPoints / totalCoef : 0
+
+        // Calculate subject ranks
         const subjectRanks: Record<string, { rank: number; classSize: number }> = {}
 
-        subjects.forEach((subject) => {
-          const subjectGrades = (allGrades || [])
-            .filter((g) => g.subject_id === subject.id && rankedStudentIds.includes(g.student_id))
-            .map((g) => ({ studentId: g.student_id, score: g.score }))
-            .sort((a, b) => b.score - a.score)
+        for (const subject of subjects) {
+          const allScores: { studentId: string; score: number }[] = []
 
-          const studentGrade = subjectGrades.find((g) => g.studentId === studentId)
-          if (studentGrade && !isUnranked) {
-            let rank = 1
-            for (let i = 0; i < subjectGrades.length; i++) {
-              if (i > 0 && subjectGrades[i].score < subjectGrades[i - 1].score) {
-                rank = i + 1
+          for (const sid of allStudentIds) {
+            let score: number | undefined
+
+            if (isTrimestriel && period.number) {
+              const seq1Num = (period.number - 1) * 2 + 1
+              const seq2Num = (period.number - 1) * 2 + 2
+
+              const { data: seqPeriods } = await supabase
+                .from("academic_periods")
+                .select("id, number")
+                .eq("type", "sequence")
+                .eq("academic_year", period.academic_year)
+                .in("number", [seq1Num, seq2Num])
+
+              const seq1Period = seqPeriods?.find((p) => p.number === seq1Num)
+              const seq2Period = seqPeriods?.find((p) => p.number === seq2Num)
+
+              let s1: number | undefined
+              let s2: number | undefined
+
+              if (seq1Period) {
+                const { data } = await supabase
+                  .from("grades")
+                  .select("score")
+                  .eq("student_id", sid)
+                  .eq("subject_id", subject.id)
+                  .eq("academic_period_id", seq1Period.id)
+                  .maybeSingle()
+                s1 = data?.score
               }
-              if (subjectGrades[i].studentId === studentId) {
-                subjectRanks[subject.id] = { rank, classSize: subjectGrades.length }
-                break
+
+              if (seq2Period) {
+                const { data } = await supabase
+                  .from("grades")
+                  .select("score")
+                  .eq("student_id", sid)
+                  .eq("subject_id", subject.id)
+                  .eq("academic_period_id", seq2Period.id)
+                  .maybeSingle()
+                s2 = data?.score
+              }
+
+              if (s1 !== undefined || s2 !== undefined) {
+                score = s1 !== undefined && s2 !== undefined ? (s1 + s2) / 2 : s1 || s2
+              }
+            } else {
+              const gradeData = allClassGrades?.find((g) => g.student_id === sid && g.subject_id === subject.id)
+              if (gradeData) {
+                score = gradeData.score
+              } else {
+                const { data } = await supabase
+                  .from("grades")
+                  .select("score")
+                  .eq("student_id", sid)
+                  .eq("subject_id", subject.id)
+                  .eq("academic_period_id", selectedPeriod)
+                  .maybeSingle()
+                score = data?.score
               }
             }
+
+            if (score !== undefined) {
+              allScores.push({ studentId: sid, score })
+            }
           }
+
+          allScores.sort((a, b) => b.score - a.score)
+          const studentScoreIndex = allScores.findIndex((s) => s.studentId === studentId)
+
+          if (studentScoreIndex !== -1) {
+            subjectRanks[subject.id] = {
+              rank: studentScoreIndex + 1,
+              classSize: allScores.length,
+            }
+          }
+        }
+
+        // Calculate class ranking and average
+        const allAverages: { studentId: string; average: number }[] = []
+
+        for (const sid of allStudentIds) {
+          let studentTotalPoints = 0
+          let studentTotalCoef = 0
+
+          for (const subject of subjects) {
+            let score: number | undefined
+
+            if (isTrimestriel && period.number) {
+              const seq1Num = (period.number - 1) * 2 + 1
+              const seq2Num = (period.number - 1) * 2 + 2
+
+              const { data: seqPeriods } = await supabase
+                .from("academic_periods")
+                .select("id, number")
+                .eq("type", "sequence")
+                .eq("academic_year", period.academic_year)
+                .in("number", [seq1Num, seq2Num])
+
+              const seq1Period = seqPeriods?.find((p) => p.number === seq1Num)
+              const seq2Period = seqPeriods?.find((p) => p.number === seq2Num)
+
+              let s1: number | undefined
+              let s2: number | undefined
+
+              if (seq1Period) {
+                const { data } = await supabase
+                  .from("grades")
+                  .select("score")
+                  .eq("student_id", sid)
+                  .eq("subject_id", subject.id)
+                  .eq("academic_period_id", seq1Period.id)
+                  .maybeSingle()
+                s1 = data?.score
+              }
+
+              if (seq2Period) {
+                const { data } = await supabase
+                  .from("grades")
+                  .select("score")
+                  .eq("student_id", sid)
+                  .eq("subject_id", subject.id)
+                  .eq("academic_period_id", seq2Period.id)
+                  .maybeSingle()
+                s2 = data?.score
+              }
+
+              if (s1 !== undefined || s2 !== undefined) {
+                score = s1 !== undefined && s2 !== undefined ? (s1 + s2) / 2 : s1 || s2
+              }
+            } else {
+              const gradeData = allClassGrades?.find((g) => g.student_id === sid && g.subject_id === subject.id)
+              if (gradeData) {
+                score = gradeData.score
+              } else {
+                const { data } = await supabase
+                  .from("grades")
+                  .select("score")
+                  .eq("student_id", sid)
+                  .eq("subject_id", subject.id)
+                  .eq("academic_period_id", selectedPeriod)
+                  .maybeSingle()
+                score = data?.score
+              }
+            }
+
+            if (score !== undefined) {
+              studentTotalPoints += score * subject.coefficient
+              studentTotalCoef += subject.coefficient
+            }
+          }
+
+          if (studentTotalCoef > 0) {
+            allAverages.push({
+              studentId: sid,
+              average: studentTotalPoints / studentTotalCoef,
+            })
+          }
+        }
+
+        // Check if student is unranked for this period
+        const { data: unrankedData } = await supabase
+          .from("student_unranked_periods")
+          .select("id")
+          .eq("student_id", studentId)
+          .eq("academic_period_id", selectedPeriod)
+          .maybeSingle()
+
+        const isUnranked = !!unrankedData
+
+        // Calculate ranks excluding unranked students
+        const rankedAverages = allAverages.filter((a) => {
+          const studentIsUnranked = students.find((s) => s.id === a.studentId)?.is_ranked === false
+          // Check if this student is unranked
+          return !studentIsUnranked
         })
+
+        rankedAverages.sort((a, b) => b.average - a.average)
+        const rank = isUnranked ? 0 : rankedAverages.findIndex((a) => a.studentId === studentId) + 1
+        const classAverage =
+          rankedAverages.length > 0 ? rankedAverages.reduce((sum, a) => sum + a.average, 0) / rankedAverages.length : 0
 
         // Calculate group averages
         const groupAverages: Record<string, number> = {}
-        const groups = [...new Set(subjects.map((s) => s.group_name))]
+        const groupPoints: Record<string, number> = {}
+        const groupCoefs: Record<string, number> = {}
 
-        groups.forEach((groupName) => {
-          const groupSubjects = subjects.filter((s) => s.group_name === groupName)
-          let totalWeighted = 0
-          let totalCoef = 0
-
-          groupSubjects.forEach((subject) => {
-            const grade = grades[subject.id]
-            if (grade) {
-              totalWeighted += grade.score * grade.coefficient
-              totalCoef += grade.coefficient
+        for (const [subjectId, grade] of Object.entries(grades)) {
+          const subject = subjects.find((s) => s.id === subjectId)
+          if (subject && grade.score !== undefined) {
+            const groupName = subject.group_name || "Autres"
+            if (!groupPoints[groupName]) {
+              groupPoints[groupName] = 0
+              groupCoefs[groupName] = 0
             }
-          })
-
-          if (totalCoef > 0) {
-            groupAverages[groupName] = Math.round((totalWeighted / totalCoef) * 100) / 100
-          }
-        })
-
-        // Calculate student average
-        let totalWeighted = 0
-        let totalCoef = 0
-        Object.values(grades).forEach((g) => {
-          totalWeighted += g.score * g.coefficient
-          totalCoef += g.coefficient
-        })
-        const average = totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0
-
-        // Calculate all students' averages for ranking
-        const studentAverages = (classStudents || []).map((s) => {
-          const sGrades = (allGrades || []).filter((g) => g.student_id === s.id)
-          let tw = 0
-          let tc = 0
-
-          if (isTrimestriel) {
-            subjects.forEach((subject) => {
-              const subjectGrades = sGrades.filter((g) => g.subject_id === subject.id)
-              if (subjectGrades.length > 0) {
-                const avgScore = subjectGrades.reduce((sum, g) => sum + g.score, 0) / subjectGrades.length
-                tw += avgScore * subject.coefficient
-                tc += subject.coefficient
-              }
-            })
-          } else {
-            subjects.forEach((subject) => {
-              const grade = sGrades.find((g) => g.subject_id === subject.id)
-              if (grade) {
-                tw += grade.score * subject.coefficient
-                tc += subject.coefficient
-              }
-            })
-          }
-
-          return { studentId: s.id, average: tc > 0 ? tw / tc : 0, isRanked: s.is_ranked !== false }
-        })
-
-        // Only rank students who are ranked
-        const rankedAverages = studentAverages.filter((s) => s.isRanked).sort((a, b) => b.average - a.average)
-
-        let rank = 0
-        if (!isUnranked) {
-          for (let i = 0; i < rankedAverages.length; i++) {
-            if (i > 0 && rankedAverages[i].average < rankedAverages[i - 1].average) {
-              rank = i + 1
-            } else if (i === 0) {
-              rank = 1
-            }
-            if (rankedAverages[i].studentId === studentId) break
+            groupPoints[groupName] += grade.score * grade.coefficient
+            groupCoefs[groupName] += grade.coefficient
           }
         }
 
-        const classAverage =
-          rankedAverages.length > 0
-            ? Math.round((rankedAverages.reduce((sum, s) => sum + s.average, 0) / rankedAverages.length) * 100) / 100
-            : 0
+        for (const groupName of Object.keys(groupPoints)) {
+          if (groupCoefs[groupName] > 0) {
+            groupAverages[groupName] = groupPoints[groupName] / groupCoefs[groupName]
+          }
+        }
 
         return {
           student,
@@ -527,14 +619,14 @@ export default function BulletinsPage() {
           classAverage,
           isUnranked,
           attendance: attendanceData,
-          section: student.class?.section?.name, // Added section
+          section: student.class?.section?.name,
         }
       } catch (error) {
         console.error("Error generating bulletin data:", error)
         return null
       }
     },
-    [supabase, selectedPeriod, bulletinType, teachersMap],
+    [selectedClass, selectedPeriod, periods, supabase, students],
   )
 
   const generateBulletin = useCallback(
@@ -548,7 +640,7 @@ export default function BulletinsPage() {
       setSelectedStudent(studentId)
 
       try {
-        const data = await generateBulletinDataForStudent(studentId)
+        const data = await generateBulletinData(studentId)
         if (data) {
           setBulletinData(data)
           setShowBulletin(true)
@@ -562,11 +654,10 @@ export default function BulletinsPage() {
         setGenerating(false)
       }
     },
-    [generateBulletinDataForStudent, selectedPeriod],
+    [generateBulletinData, selectedPeriod],
   )
 
   const handleDownloadPDF = async () => {
-    // Ensure we have bulletin data before proceeding
     if (!bulletinData) {
       toast.error("Aucune donnée de bulletin à télécharger.")
       return
@@ -574,6 +665,8 @@ export default function BulletinsPage() {
 
     setDownloading(true)
     try {
+      const isAnglophone = bulletinData.section?.toLowerCase().includes("anglo")
+
       const pdfData = {
         student: {
           first_name: bulletinData.student.first_name,
@@ -582,8 +675,8 @@ export default function BulletinsPage() {
           date_of_birth: bulletinData.student.date_of_birth || "",
           place_of_birth: bulletinData.student.place_of_birth || "",
           gender: bulletinData.student.gender || "",
-          photo: bulletinData.student.photo || "", // Added photo
-          isRanked: !bulletinData.isUnranked, // Added isRanked
+          photo: bulletinData.student.photo || "",
+          isRanked: !bulletinData.isUnranked,
         },
         class: {
           name: bulletinData.student.class?.name || "",
@@ -593,9 +686,9 @@ export default function BulletinsPage() {
           type: bulletinData.period?.type || "sequence",
           academic_year: schoolSettings?.current_academic_year || "2024-2025",
         },
-        attendance: bulletinData.attendance,
+        attendance: bulletinData.attendance || { total_hours: 0, justified_hours: 0, unjustified_hours: 0 },
         subjects: bulletinData.subjects.map((s: any) => ({
-          id: s.id, // Added subject ID
+          id: s.id,
           name: s.name,
           teacher: s.teacher_name || "",
           coefficient: s.coefficient || 1,
@@ -622,24 +715,15 @@ export default function BulletinsPage() {
           po_box: schoolSettings?.po_box || "",
           current_academic_year: schoolSettings?.current_academic_year || "2024-2025",
         },
-        section: bulletinData.section || "", // Added section
-        schoolInfo: {
-          poBox: schoolSettings?.po_box || "",
-          logo: schoolSettings?.logo_url || "",
-        },
-        // Added missing fields that might be expected by generateBulletinPDF
-        className: bulletinData.student.class?.name || "",
-        periodName: bulletinData.period.name,
-        periodType: bulletinData.period.type,
-        // Assuming 'periods' is an array of period objects, adjust if needed
-        periods: [bulletinData.period], // Pass the current period in an array
+        section: bulletinData.section || "",
+        isAnglophone,
       }
 
-      await generateBulletinPDF(pdfData as any) // Cast to any to bypass potential type issues if pdfData is not perfectly typed
-      toast.success("PDF téléchargé avec succès!")
+      await generateBulletinPDF(pdfData as any)
+      toast.success(isAnglophone ? "PDF downloaded successfully!" : "PDF téléchargé avec succès!")
     } catch (error) {
       console.error("Error downloading PDF:", error)
-      toast.error("Erreur lors du téléchargement")
+      toast.error("Erreur lors du téléchargement du PDF")
     } finally {
       setDownloading(false)
     }
@@ -658,7 +742,7 @@ export default function BulletinsPage() {
       const bulletinsData: any[] = []
 
       for (const student of students) {
-        const data = await generateBulletinDataForStudent(student.id)
+        const data = await generateBulletinData(student.id)
         if (data) {
           const pdfData = {
             schoolName: schoolSettings?.school_name || "HARMONY School",
