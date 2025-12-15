@@ -1,425 +1,591 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { AppLayout } from "@/components/layout/app-layout"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Loader2, Download, Users, Eye, FileText } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Download, Search, Eye, Loader2, Users } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
+import { cn } from "@/lib/utils"
 import { generateBulletinPDF, generateMassBulletinsPDF, type BulletinData } from "@/lib/services/bulletin-pdf-generator"
 
-interface Section {
+type Student = {
   id: string
-  name: string
-}
-
-interface Level {
-  id: string
-  name: string
-  section_id: string
-}
-
-interface Class {
-  id: string
-  name: string
-  level_id: string
-}
-
-interface Period {
-  id: string
-  name: string
-  type: string
-  trimester_id?: string
-}
-
-interface Student {
-  id: string
+  matricule: string
   first_name: string
   last_name: string
-  matricule: string
-  date_of_birth?: string
-  place_of_birth?: string
-  gender?: string
-  class?: { name: string }
+  date_of_birth: string
+  place_of_birth: string | null
+  gender: string
+  class_id: string
+  class?: { name: string; level?: { name: string }; section?: { name: string } }
+  is_ranked?: boolean
+  photo?: string | null
 }
 
-interface SchoolSettings {
-  school_name: string
-  school_slogan?: string
-  address?: string
-  phone?: string
-  email?: string
-  po_box?: string
-  current_academic_year?: string
-  logo_url?: string
+type ClassType = { id: string; name: string; level_id: string }
+type AcademicPeriod = { id: string; name: string; type: string; academic_year: string; number?: number }
+
+type Subject = {
+  id: string
+  name: string
+  code: string
+  coefficient: number
+  group_name: string
+  teacher_name?: string
 }
 
-interface PreviewStudent {
-  student: Student
+type LocalBulletinData = {
+  student: any
+  period: AcademicPeriod
+  subjects: Subject[]
+  grades: Record<string, { score: number; coefficient: number }>
+  subjectRanks?: Record<string, { rank: number; classSize: number }>
+  sequenceGrades?: {
+    seq1: Record<string, number>
+    seq2: Record<string, number>
+  }
+  groupAverages: Record<string, number>
   average: number
-  rank: number | string
-  isUnranked: boolean
+  rank: number
+  classSize: number
+  classAverage: number
+  isUnranked?: boolean
+  attendance?: any
+  section?: string
+  seq1Average?: number
+  seq2Average?: number
+}
+
+function getGradeColor(score: number | undefined): string {
+  if (score === undefined) return "text-muted-foreground"
+  if (score < 10) return "text-red-600"
+  if (score < 12) return "text-amber-600"
+  if (score < 15) return "text-blue-600"
+  return "text-green-600"
+}
+
+function getAppreciation(score: number, isEnglish: boolean): string {
+  if (isEnglish) {
+    if (score >= 18) return "Excellent"
+    if (score >= 16) return "Very Good"
+    if (score >= 14) return "Good"
+    if (score >= 12) return "Fairly Good"
+    if (score >= 10) return "Average"
+    if (score >= 8) return "Below Average"
+    return "Poor"
+  }
+  if (score >= 18) return "Excellent"
+  if (score >= 16) return "Très Bien"
+  if (score >= 14) return "Bien"
+  if (score >= 12) return "Assez Bien"
+  if (score >= 10) return "Passable"
+  if (score >= 8) return "Insuffisant"
+  return "Très Insuffisant"
 }
 
 export default function BulletinsPage() {
-  const supabase = createClient()
-
-  const [sections, setSections] = useState<Section[]>([])
-  const [levels, setLevels] = useState<Level[]>([])
-  const [classes, setClasses] = useState<Class[]>([])
-  const [periods, setPeriods] = useState<Period[]>([])
-  const [students, setStudents] = useState<Student[]>([])
-  const [schoolSettings, setSchoolSettings] = useState<SchoolSettings | null>(null)
-
-  const [selectedSection, setSelectedSection] = useState<string>("")
-  const [selectedLevel, setSelectedLevel] = useState<string>("")
-  const [selectedClass, setSelectedClass] = useState<string>("")
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("")
-  const [selectedStudent, setSelectedStudent] = useState<string>("")
-
-  const [loading, setLoading] = useState(false)
+  const [selectedClass, setSelectedClass] = useState("")
+  const [selectedStudent, setSelectedStudent] = useState("")
+  const [selectedPeriod, setSelectedPeriod] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [showBulletin, setShowBulletin] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [massGenerating, setMassGenerating] = useState(false)
 
-  const [bulletinData, setBulletinData] = useState<any>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
+  const [classes, setClasses] = useState<ClassType[]>([])
+  const [periods, setPeriods] = useState<AcademicPeriod[]>([])
+  const [students, setStudents] = useState<Student[]>([])
+  const [bulletinData, setBulletinData] = useState<LocalBulletinData | null>(null)
+  const [schoolSettings, setSchoolSettings] = useState<any>(null)
+  const [teachersMap, setTeachersMap] = useState<Record<string, string>>({})
 
-  const [classPreviewOpen, setClassPreviewOpen] = useState(false)
-  const [classPreviewData, setClassPreviewData] = useState<PreviewStudent[]>([])
-  const [loadingClassPreview, setLoadingClassPreview] = useState(false)
+  const supabase = createClient()
 
   // Fetch initial data
   useEffect(() => {
-    const fetchData = async () => {
-      const [sectionsRes, periodsRes, settingsRes] = await Promise.all([
-        supabase.from("sections").select("*").order("name"),
-        supabase.from("academic_periods").select("*").order("name"),
-        supabase.from("school_settings").select("*").single(),
-      ])
+    async function fetchInitialData() {
+      setLoading(true)
+      try {
+        const [classesRes, periodsRes, settingsRes] = await Promise.all([
+          supabase.from("classes").select("id, name, level_id").order("name"),
+          supabase.from("academic_periods").select("*").order("number"),
+          supabase.from("school_settings").select("*").limit(1),
+        ])
 
-      if (sectionsRes.data) setSections(sectionsRes.data)
-      if (periodsRes.data) setPeriods(periodsRes.data)
-      if (settingsRes.data) setSchoolSettings(settingsRes.data)
+        setClasses(classesRes.data || [])
+        setPeriods(periodsRes.data || [])
+        setSchoolSettings(
+          settingsRes.data?.[0] || {
+            school_name: "COLLEGE POLYVALENT LES SAVANTS DE ANGE MADO",
+            current_academic_year: "2024-2025",
+          },
+        )
+      } catch (error) {
+        console.error("Error fetching initial data:", error)
+      } finally {
+        setLoading(false)
+      }
     }
-    fetchData()
+    fetchInitialData()
   }, [])
 
-  // Fetch levels when section changes
+  // Fetch students and teachers when class changes
   useEffect(() => {
-    if (!selectedSection) {
-      setLevels([])
-      setSelectedLevel("")
-      return
-    }
-    const fetchLevels = async () => {
-      const { data } = await supabase.from("levels").select("*").eq("section_id", selectedSection).order("name")
-      if (data) setLevels(data)
-    }
-    fetchLevels()
-  }, [selectedSection])
+    async function fetchStudentsAndTeachers() {
+      if (!selectedClass) {
+        setStudents([])
+        setTeachersMap({})
+        return
+      }
 
-  // Fetch classes when level changes
-  useEffect(() => {
-    if (!selectedLevel) {
-      setClasses([])
-      setSelectedClass("")
-      return
-    }
-    const fetchClasses = async () => {
-      const { data } = await supabase.from("classes").select("*").eq("level_id", selectedLevel).order("name")
-      if (data) setClasses(data)
-    }
-    fetchClasses()
-  }, [selectedLevel])
-
-  // Fetch students when class changes
-  useEffect(() => {
-    if (!selectedClass) {
-      setStudents([])
-      setSelectedStudent("")
-      return
-    }
-    const fetchStudents = async () => {
-      const { data } = await supabase
+      const { data: studentsData } = await supabase
         .from("students")
-        .select("*, class:classes(name)")
+        .select(
+          "id, matricule, first_name, last_name, date_of_birth, place_of_birth, gender, class_id, is_ranked, class:classes(name, level:levels(id, name), section:sections(id, name)), photo",
+        )
         .eq("class_id", selectedClass)
         .ilike("status", "active")
         .order("last_name")
-      if (data) setStudents(data)
-    }
-    fetchStudents()
-  }, [selectedClass])
 
-  // Generate bulletin data for a student
-  const generateBulletinData = useCallback(
-    async (studentId: string) => {
-      if (!selectedClass || !selectedPeriod) return null
+      setStudents(studentsData || [])
 
-      const student = students.find((s) => s.id === studentId)
-      if (!student) return null
+      const { data: classSubjectsWithTeachers } = await supabase
+        .from("class_subjects")
+        .select("subject_id, teacher:teachers(first_name, last_name)")
+        .eq("class_id", selectedClass)
 
-      const period = periods.find((p) => p.id === selectedPeriod)
-      if (!period) return null
-
-      // Check if student is unranked for this period
-      const { data: unrankedData } = await supabase
-        .from("student_unranked_periods")
-        .select("id")
-        .eq("student_id", studentId)
-        .eq("academic_period_id", selectedPeriod)
-        .single()
-
-      const isUnranked = !!unrankedData
-
-      // Fetch subjects
-      const [classSubjectsRes, levelSubjectsRes] = await Promise.all([
-        supabase
-          .from("class_subjects")
-          .select(
-            "*, subject:subjects(id, name, subject_group:subject_groups(name)), teacher:teachers(first_name, last_name)",
-          )
-          .eq("class_id", selectedClass),
-        supabase
-          .from("level_subjects")
-          .select(
-            "*, subject:subjects(id, name, subject_group:subject_groups(name)), teacher:teachers(first_name, last_name)",
-          )
-          .eq("level_id", selectedLevel),
-      ])
-
-      const allSubjects: any[] = []
-
-      if (classSubjectsRes.data) {
-        for (const cs of classSubjectsRes.data) {
-          allSubjects.push({
-            id: cs.subject?.id,
-            name: cs.subject?.name,
-            coefficient: cs.coefficient || 1,
-            group_name: cs.subject?.subject_group?.name || "Autres",
-            teacher_name: cs.teacher ? `${cs.teacher.first_name} ${cs.teacher.last_name}` : "",
-          })
+      const tMap: Record<string, string> = {}
+      if (classSubjectsWithTeachers) {
+        for (const cs of classSubjectsWithTeachers) {
+          if (cs.teacher && cs.subject_id) {
+            const t = cs.teacher as any
+            tMap[cs.subject_id] = `${t.first_name || ""} ${t.last_name || ""}`.trim()
+          }
         }
       }
+      setTeachersMap(tMap)
+    }
+    fetchStudentsAndTeachers()
+  }, [selectedClass])
 
-      if (levelSubjectsRes.data) {
-        for (const ls of levelSubjectsRes.data) {
-          if (!allSubjects.some((s) => s.id === ls.subject?.id)) {
-            allSubjects.push({
-              id: ls.subject?.id,
-              name: ls.subject?.name,
+  const filteredStudents = students.filter(
+    (s) =>
+      s.first_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.last_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      s.matricule.toLowerCase().includes(searchQuery.toLowerCase()),
+  )
+
+  // Generate bulletin data for a student - MAIN FUNCTION
+  const generateBulletinDataForStudent = useCallback(
+    async (studentId: string, allClassGrades?: any[]): Promise<LocalBulletinData | null> => {
+      try {
+        const { data: student, error: studentError } = await supabase
+          .from("students")
+          .select("*, class:classes(*, level:levels(*), section:sections(*))")
+          .eq("id", studentId)
+          .single()
+
+        if (studentError || !student) throw new Error("Élève non trouvé")
+
+        const { data: period } = await supabase.from("academic_periods").select("*").eq("id", selectedPeriod).single()
+
+        if (!period) throw new Error("Période non trouvée")
+
+        // Fetch attendance for trimester
+        let attendanceData: any = undefined
+        if (period.type === "trimester") {
+          const { data: attendance } = await supabase
+            .from("attendances")
+            .select("*")
+            .eq("student_id", studentId)
+            .eq("academic_period_id", selectedPeriod)
+            .maybeSingle()
+
+          if (attendance) {
+            attendanceData = {
+              total_hours: attendance.total_hours || 0,
+              justified_hours: attendance.justified_hours || 0,
+              unjustified_hours: (attendance.total_hours || 0) - (attendance.justified_hours || 0),
+            }
+          }
+        }
+
+        // Check if student is NC
+        const { data: unrankedData } = await supabase
+          .from("student_nc_periods")
+          .select("id")
+          .eq("student_id", studentId)
+          .eq("academic_period_id", selectedPeriod)
+          .maybeSingle()
+
+        const isUnranked = !!unrankedData || student.is_ranked === false
+
+        const levelId = student.class?.level_id
+        const classId = student.class_id
+        const isTrimestriel = period.type === "trimester"
+
+        // Fetch class subjects with teachers
+        const { data: classSubjectsData } = await supabase
+          .from("class_subjects")
+          .select(
+            "id, subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(id, name))",
+          )
+          .eq("class_id", classId)
+
+        // Fetch level subjects
+        let levelSubjectsData: any[] = []
+        if (levelId) {
+          const { data } = await supabase
+            .from("level_subjects")
+            .select(
+              "id, subject_id, coefficient, teacher_id, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(id, name))",
+            )
+            .eq("level_id", levelId)
+          levelSubjectsData = data || []
+        }
+
+        // Combine subjects
+        const subjectsMap = new Map<string, Subject>()
+
+        if (classSubjectsData) {
+          for (const cs of classSubjectsData) {
+            if (cs.subject && cs.subject_id) {
+              const subj = cs.subject as any
+              const teacher = cs.teacher as any
+              subjectsMap.set(cs.subject_id, {
+                id: cs.subject_id,
+                name: subj.name || "",
+                code: subj.code || "",
+                coefficient: cs.coefficient || 1,
+                group_name: subj.subject_group?.name || "Autres",
+                teacher_name: teacher ? `${teacher.first_name || ""} ${teacher.last_name || ""}`.trim() : undefined,
+              })
+            }
+          }
+        }
+
+        for (const ls of levelSubjectsData) {
+          if (ls.subject && ls.subject_id && !subjectsMap.has(ls.subject_id)) {
+            const subj = ls.subject as any
+            const teacher = ls.teacher as any
+            subjectsMap.set(ls.subject_id, {
+              id: ls.subject_id,
+              name: subj.name || "",
+              code: subj.code || "",
               coefficient: ls.coefficient || 1,
-              group_name: ls.subject?.subject_group?.name || "Autres",
-              teacher_name: ls.teacher ? `${ls.teacher.first_name} ${ls.teacher.last_name}` : "",
+              group_name: subj.subject_group?.name || "Autres",
+              teacher_name: teacher ? `${teacher.first_name || ""} ${teacher.last_name || ""}`.trim() : undefined,
             })
           }
         }
-      }
 
-      // Fetch grades
-      const { data: gradesData } = await supabase
-        .from("grades")
-        .select("subject_id, score")
-        .eq("student_id", studentId)
-        .eq("academic_period_id", selectedPeriod)
+        const subjects = Array.from(subjectsMap.values()).sort(
+          (a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name),
+        )
 
-      const grades: Record<string, { score: number | undefined }> = {}
-      if (gradesData) {
-        for (const g of gradesData) {
-          grades[g.subject_id] = { score: g.score }
-        }
-      }
+        // Get all students in class for ranking
+        const { data: classStudents } = await supabase
+          .from("students")
+          .select("id, is_ranked")
+          .eq("class_id", classId)
+          .ilike("status", "active")
 
-      // For trimester: fetch sequence grades
-      const sequenceGrades: { seq1: Record<string, number | undefined>; seq2: Record<string, number | undefined> } = {
-        seq1: {},
-        seq2: {},
-      }
+        const rankedStudentIds = (classStudents || []).filter((s) => s.is_ranked !== false).map((s) => s.id)
+        const allStudentIds = (classStudents || []).map((s) => s.id)
+        const subjectIds = subjects.map((s) => s.id)
 
-      if (period.type === "trimester") {
-        const { data: seqPeriods } = await supabase
-          .from("academic_periods")
-          .select("id, name")
-          .eq("trimester_id", selectedPeriod)
-          .eq("type", "sequence")
-          .order("name")
+        const grades: Record<string, { score: number; coefficient: number }> = {}
+        let sequenceGrades: { seq1: Record<string, number>; seq2: Record<string, number> } | undefined
 
-        if (seqPeriods && seqPeriods.length >= 2) {
-          const [seq1Grades, seq2Grades] = await Promise.all([
-            supabase
+        let allGrades = allClassGrades
+
+        if (isTrimestriel && period.number) {
+          // Calculate sequence numbers from trimester number
+          const seq1Num = (period.number - 1) * 2 + 1
+          const seq2Num = (period.number - 1) * 2 + 2
+
+          const { data: seqPeriods } = await supabase
+            .from("academic_periods")
+            .select("id, number")
+            .eq("type", "sequence")
+            .eq("academic_year", period.academic_year)
+            .in("number", [seq1Num, seq2Num])
+
+          const seq1Period = seqPeriods?.find((p) => p.number === seq1Num)
+          const seq2Period = seqPeriods?.find((p) => p.number === seq2Num)
+
+          sequenceGrades = { seq1: {}, seq2: {} }
+
+          // Fetch sequence 1 grades
+          if (seq1Period && subjectIds.length > 0) {
+            const { data: seq1Grades } = await supabase
               .from("grades")
-              .select("subject_id, score")
+              .select("student_id, subject_id, score")
               .eq("student_id", studentId)
-              .eq("academic_period_id", seqPeriods[0].id),
-            supabase
-              .from("grades")
-              .select("subject_id, score")
-              .eq("student_id", studentId)
-              .eq("academic_period_id", seqPeriods[1].id),
-          ])
+              .in("subject_id", subjectIds)
+              .eq("academic_period_id", seq1Period.id)
 
-          if (seq1Grades.data) {
-            for (const g of seq1Grades.data) sequenceGrades.seq1[g.subject_id] = g.score
-          }
-          if (seq2Grades.data) {
-            for (const g of seq2Grades.data) sequenceGrades.seq2[g.subject_id] = g.score
-          }
-        }
-      }
-
-      // Fetch attendance (only for trimesters)
-      let attendance = null
-      if (period.type === "trimester") {
-        const { data: attendanceData } = await supabase
-          .from("attendances")
-          .select("*")
-          .eq("student_id", studentId)
-          .eq("trimester_id", selectedPeriod)
-          .single()
-
-        if (attendanceData) {
-          attendance = {
-            total_hours: attendanceData.total_hours || 0,
-            justified_hours: attendanceData.justified_hours || 0,
-            unjustified_hours: (attendanceData.total_hours || 0) - (attendanceData.justified_hours || 0),
-          }
-        }
-      }
-
-      // Calculate average
-      let totalWeighted = 0
-      let totalCoef = 0
-      for (const subj of allSubjects) {
-        const score = grades[subj.id]?.score
-        if (score !== undefined && score !== null) {
-          totalWeighted += score * subj.coefficient
-          totalCoef += subj.coefficient
-        }
-      }
-      const average = totalCoef > 0 ? totalWeighted / totalCoef : 0
-
-      // Calculate class stats
-      const allStudentAverages: { studentId: string; average: number; isRanked: boolean }[] = []
-
-      for (const s of students) {
-        const { data: sGrades } = await supabase
-          .from("grades")
-          .select("subject_id, score")
-          .eq("student_id", s.id)
-          .eq("academic_period_id", selectedPeriod)
-
-        const { data: sUnranked } = await supabase
-          .from("student_unranked_periods")
-          .select("id")
-          .eq("student_id", s.id)
-          .eq("academic_period_id", selectedPeriod)
-          .single()
-
-        let tw = 0
-        let tc = 0
-        if (sGrades) {
-          for (const sg of sGrades) {
-            const subj = allSubjects.find((sub) => sub.id === sg.subject_id)
-            if (subj && sg.score !== null && sg.score !== undefined) {
-              tw += sg.score * subj.coefficient
-              tc += subj.coefficient
+            for (const g of seq1Grades || []) {
+              sequenceGrades.seq1[g.subject_id] = g.score
             }
           }
-        }
-        allStudentAverages.push({
-          studentId: s.id,
-          average: tc > 0 ? tw / tc : 0,
-          isRanked: !sUnranked,
-        })
-      }
 
-      const rankedStudents = allStudentAverages.filter((s) => s.isRanked).sort((a, b) => b.average - a.average)
-      const classAverage =
-        rankedStudents.length > 0 ? rankedStudents.reduce((sum, s) => sum + s.average, 0) / rankedStudents.length : 0
-
-      let rank = 0
-      if (!isUnranked) {
-        rank = rankedStudents.findIndex((s) => s.studentId === studentId) + 1
-      }
-
-      // Calculate subject ranks
-      const subjectRanks: Record<string, { rank: number; classSize: number }> = {}
-      for (const subj of allSubjects) {
-        const subjectScores: { studentId: string; score: number }[] = []
-
-        for (const s of students) {
-          const sData = allStudentAverages.find((sa) => sa.studentId === s.id)
-          if (sData?.isRanked) {
-            const { data: sg } = await supabase
+          // Fetch sequence 2 grades
+          if (seq2Period && subjectIds.length > 0) {
+            const { data: seq2Grades } = await supabase
               .from("grades")
-              .select("score")
-              .eq("student_id", s.id)
-              .eq("subject_id", subj.id)
+              .select("student_id, subject_id, score")
+              .eq("student_id", studentId)
+              .in("subject_id", subjectIds)
+              .eq("academic_period_id", seq2Period.id)
+
+            for (const g of seq2Grades || []) {
+              sequenceGrades.seq2[g.subject_id] = g.score
+            }
+          }
+
+          // Calculate trimester average from both sequences
+          subjects.forEach((subject) => {
+            const s1 = sequenceGrades!.seq1[subject.id]
+            const s2 = sequenceGrades!.seq2[subject.id]
+            if (s1 !== undefined || s2 !== undefined) {
+              const avg = s1 !== undefined && s2 !== undefined ? (s1 + s2) / 2 : (s1 ?? s2)!
+              grades[subject.id] = { score: avg, coefficient: subject.coefficient }
+            }
+          })
+
+          // Fetch all grades for ranking
+          if (!allGrades) {
+            const periodIds = (seqPeriods || []).map((p) => p.id)
+            if (periodIds.length > 0 && allStudentIds.length > 0 && subjectIds.length > 0) {
+              const { data } = await supabase
+                .from("grades")
+                .select("student_id, subject_id, score, academic_period_id")
+                .in("student_id", allStudentIds)
+                .in("subject_id", subjectIds)
+                .in("academic_period_id", periodIds)
+              allGrades = data || []
+            }
+          }
+        } else {
+          // Simple sequence - fetch grades directly
+          if (subjectIds.length > 0) {
+            const { data: gradesData } = await supabase
+              .from("grades")
+              .select("student_id, subject_id, score")
+              .eq("student_id", studentId)
+              .in("subject_id", subjectIds)
               .eq("academic_period_id", selectedPeriod)
-              .single()
 
-            if (sg?.score !== undefined && sg?.score !== null) {
-              subjectScores.push({ studentId: s.id, score: sg.score })
+            for (const g of gradesData || []) {
+              const subject = subjects.find((s) => s.id === g.subject_id)
+              if (subject) {
+                grades[g.subject_id] = { score: g.score, coefficient: subject.coefficient }
+              }
             }
+          }
+
+          // Fetch all grades for ranking
+          if (!allGrades && allStudentIds.length > 0 && subjectIds.length > 0) {
+            const { data } = await supabase
+              .from("grades")
+              .select("student_id, subject_id, score")
+              .in("student_id", allStudentIds)
+              .in("subject_id", subjectIds)
+              .eq("academic_period_id", selectedPeriod)
+            allGrades = data || []
           }
         }
 
-        subjectScores.sort((a, b) => b.score - a.score)
+        // Calculate subject ranks
+        const subjectRanks: Record<string, { rank: number; classSize: number }> = {}
+        subjects.forEach((subject) => {
+          const subjectGrades = (allGrades || [])
+            .filter((g) => g.subject_id === subject.id && rankedStudentIds.includes(g.student_id))
+            .map((g) => ({ studentId: g.student_id, score: g.score }))
+            .sort((a, b) => b.score - a.score)
 
-        const studentScore = grades[subj.id]?.score
-        if (studentScore !== undefined && !isUnranked) {
-          const subjRank = subjectScores.findIndex((s) => s.studentId === studentId) + 1
-          subjectRanks[subj.id] = { rank: subjRank, classSize: subjectScores.length }
+          const studentGrade = subjectGrades.find((g) => g.studentId === studentId)
+          if (studentGrade && !isUnranked) {
+            let rank = 1
+            for (let i = 0; i < subjectGrades.length; i++) {
+              if (i > 0 && subjectGrades[i].score < subjectGrades[i - 1].score) {
+                rank = i + 1
+              }
+              if (subjectGrades[i].studentId === studentId) {
+                subjectRanks[subject.id] = { rank, classSize: subjectGrades.length }
+                break
+              }
+            }
+          }
+        })
+
+        // Calculate group averages
+        const groupAverages: Record<string, number> = {}
+        const groups = [...new Set(subjects.map((s) => s.group_name))]
+
+        groups.forEach((groupName) => {
+          const groupSubjects = subjects.filter((s) => s.group_name === groupName)
+          let totalWeighted = 0
+          let totalCoef = 0
+
+          groupSubjects.forEach((subject) => {
+            const grade = grades[subject.id]
+            if (grade) {
+              totalWeighted += grade.score * grade.coefficient
+              totalCoef += grade.coefficient
+            }
+          })
+
+          if (totalCoef > 0) {
+            groupAverages[groupName] = Math.round((totalWeighted / totalCoef) * 100) / 100
+          }
+        })
+
+        // Calculate student average
+        let totalWeighted = 0
+        let totalCoef = 0
+        Object.values(grades).forEach((g) => {
+          totalWeighted += g.score * g.coefficient
+          totalCoef += g.coefficient
+        })
+        const average = totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0
+
+        // Calculate sequence averages for trimester
+        let seq1Average = 0
+        let seq2Average = 0
+        if (isTrimestriel && sequenceGrades) {
+          let tw1 = 0,
+            tc1 = 0,
+            tw2 = 0,
+            tc2 = 0
+          subjects.forEach((subject) => {
+            if (sequenceGrades!.seq1[subject.id] !== undefined) {
+              tw1 += sequenceGrades!.seq1[subject.id] * subject.coefficient
+              tc1 += subject.coefficient
+            }
+            if (sequenceGrades!.seq2[subject.id] !== undefined) {
+              tw2 += sequenceGrades!.seq2[subject.id] * subject.coefficient
+              tc2 += subject.coefficient
+            }
+          })
+          seq1Average = tc1 > 0 ? Math.round((tw1 / tc1) * 100) / 100 : 0
+          seq2Average = tc2 > 0 ? Math.round((tw2 / tc2) * 100) / 100 : 0
         }
-      }
 
-      return {
-        student,
-        subjects: allSubjects,
-        grades,
-        sequenceGrades,
-        average,
-        rank,
-        classSize: rankedStudents.length,
-        classAverage,
-        isUnranked,
-        attendance,
-        subjectRanks,
-        section: sections.find((s) => s.id === selectedSection)?.name || "",
+        // Calculate all students' averages for ranking
+        const studentAverages = (classStudents || []).map((s) => {
+          const sGrades = (allGrades || []).filter((g) => g.student_id === s.id)
+          let tw = 0
+          let tc = 0
+
+          if (isTrimestriel) {
+            subjects.forEach((subject) => {
+              const subjectGrades = sGrades.filter((g) => g.subject_id === subject.id)
+              if (subjectGrades.length > 0) {
+                const avgScore = subjectGrades.reduce((sum, g) => sum + g.score, 0) / subjectGrades.length
+                tw += avgScore * subject.coefficient
+                tc += subject.coefficient
+              }
+            })
+          } else {
+            subjects.forEach((subject) => {
+              const grade = sGrades.find((g) => g.subject_id === subject.id)
+              if (grade) {
+                tw += grade.score * subject.coefficient
+                tc += subject.coefficient
+              }
+            })
+          }
+
+          return { studentId: s.id, average: tc > 0 ? tw / tc : 0, isRanked: s.is_ranked !== false }
+        })
+
+        const rankedAverages = studentAverages.filter((s) => s.isRanked).sort((a, b) => b.average - a.average)
+
+        let rank = 0
+        if (!isUnranked) {
+          for (let i = 0; i < rankedAverages.length; i++) {
+            if (i > 0 && rankedAverages[i].average < rankedAverages[i - 1].average) {
+              rank = i + 1
+            } else if (i === 0) {
+              rank = 1
+            }
+            if (rankedAverages[i].studentId === studentId) break
+          }
+        }
+
+        const classAverage =
+          rankedAverages.length > 0
+            ? Math.round((rankedAverages.reduce((sum, s) => sum + s.average, 0) / rankedAverages.length) * 100) / 100
+            : 0
+
+        return {
+          student,
+          period,
+          subjects,
+          grades,
+          subjectRanks,
+          sequenceGrades,
+          groupAverages,
+          average,
+          rank,
+          classSize: rankedAverages.length,
+          classAverage,
+          isUnranked,
+          attendance: attendanceData,
+          section: student.class?.section?.name,
+          seq1Average,
+          seq2Average,
+        }
+      } catch (error) {
+        console.error("Error generating bulletin data:", error)
+        return null
       }
     },
-    [selectedClass, selectedPeriod, selectedLevel, selectedSection, periods, students, sections, supabase],
+    [supabase, selectedPeriod],
   )
 
-  // Handle student selection and generate preview
-  const handleStudentSelect = async (studentId: string) => {
-    setSelectedStudent(studentId)
-    if (!studentId) {
-      setBulletinData(null)
-      return
-    }
+  // Generate bulletin for selected student
+  const generateBulletin = useCallback(
+    async (studentId: string) => {
+      if (!selectedPeriod) {
+        toast.error("Veuillez sélectionner une période")
+        return
+      }
 
-    setGenerating(true)
-    try {
-      const data = await generateBulletinData(studentId)
-      setBulletinData(data)
-    } catch (error) {
-      console.error("Error generating bulletin:", error)
-      toast.error("Erreur lors de la génération")
-    } finally {
-      setGenerating(false)
-    }
-  }
+      setGenerating(true)
+      setSelectedStudent(studentId)
 
-  const createPdfData = (data: any): BulletinData => {
-    const period = periods.find((p) => p.id === selectedPeriod)
-    const section = sections.find((s) => s.id === selectedSection)
-    const currentClass = classes.find((c) => c.id === selectedClass)
+      try {
+        const data = await generateBulletinDataForStudent(studentId)
+        if (data) {
+          setBulletinData(data)
+          setShowBulletin(true)
+        }
+      } catch (error) {
+        console.error(error)
+        toast.error("Erreur lors de la génération du bulletin")
+      } finally {
+        setGenerating(false)
+      }
+    },
+    [selectedPeriod, generateBulletinDataForStudent],
+  )
+
+  // Create PDF data from bulletin data
+  const createPdfData = (data: LocalBulletinData): BulletinData => {
+    const isEnglish = data.section?.toLowerCase().includes("anglophone")
+    const isTrimester = data.period.type === "trimester"
 
     return {
       student: {
@@ -431,43 +597,48 @@ export default function BulletinsPage() {
         gender: data.student.gender || "",
         isRanked: !data.isUnranked,
       },
-      className: data.student.class?.name || currentClass?.name || "",
-      periodName: period?.name || "",
-      periodType: (period?.type as "sequence" | "trimester") || "sequence",
-      academicYear: schoolSettings?.current_academic_year || "2024-2025",
-      section: section?.name || "",
-      subjects: data.subjects.map((s: any) => {
-        const score = data.grades?.[s.id]?.score
+      className: data.student.class?.name || "",
+      periodName: data.period.name || "",
+      periodType: data.period.type as "sequence" | "trimester",
+      academicYear: data.period.academic_year || schoolSettings?.current_academic_year || "",
+      section: data.section || "",
+      subjects: data.subjects.map((s) => {
+        const grade = data.grades[s.id]
+        const seq1 = data.sequenceGrades?.seq1[s.id]
+        const seq2 = data.sequenceGrades?.seq2[s.id]
+        const subjectRank = data.subjectRanks?.[s.id]
+
         return {
           name: s.name,
           teacher: s.teacher_name || "",
-          coefficient: s.coefficient || 1,
-          score1: data.sequenceGrades?.seq1?.[s.id],
-          score2: data.sequenceGrades?.seq2?.[s.id],
-          average: score, // Don't default to 0, keep undefined if no score
-          group: s.group_name || "",
-          rank: data.subjectRanks?.[s.id]?.rank,
-          classSize: data.subjectRanks?.[s.id]?.classSize,
+          coefficient: s.coefficient,
+          score1: isTrimester ? seq1 : undefined,
+          score2: isTrimester ? seq2 : undefined,
+          average: grade?.score,
+          rank: subjectRank?.rank,
+          classSize: subjectRank?.classSize,
+          group: s.group_name,
         }
       }),
-      average: data.average || 0,
+      average: data.average,
       rank: data.isUnranked ? "NC" : data.rank,
-      classSize: data.classSize || 1,
-      classAverage: data.classAverage || 0,
+      classSize: data.classSize,
+      classAverage: data.classAverage,
       attendance: data.attendance,
+      seq1Average: data.seq1Average,
+      seq2Average: data.seq2Average,
       schoolSettings: {
-        school_name: schoolSettings?.school_name || "HARMONY School",
+        school_name: schoolSettings?.school_name || "",
         school_slogan: schoolSettings?.school_slogan || "",
         address: schoolSettings?.address || "",
         phone: schoolSettings?.phone || "",
         email: schoolSettings?.email || "",
-        po_box: schoolSettings?.po_box || "",
-        logo_url: schoolSettings?.logo_url || "", // Add logo_url
+        logo_url: schoolSettings?.logo_url || "",
       },
     }
   }
 
-  // Download individual PDF
+  // Download PDF
   const handleDownloadPDF = async () => {
     if (!bulletinData) return
 
@@ -475,7 +646,7 @@ export default function BulletinsPage() {
     try {
       const pdfData = createPdfData(bulletinData)
       await generateBulletinPDF(pdfData)
-      toast.success("PDF téléchargé avec succès!")
+      toast.success("PDF téléchargé avec succès")
     } catch (error) {
       console.error("Error downloading PDF:", error)
       toast.error("Erreur lors du téléchargement")
@@ -484,168 +655,77 @@ export default function BulletinsPage() {
     }
   }
 
-  const loadClassPreview = async () => {
-    if (!selectedClass || !selectedPeriod) {
-      toast.error("Veuillez sélectionner une classe et une période")
-      return
-    }
-
-    setLoadingClassPreview(true)
-    setClassPreviewOpen(true)
-
-    try {
-      const previewData: PreviewStudent[] = []
-
-      for (const student of students) {
-        const data = await generateBulletinData(student.id)
-        if (data) {
-          previewData.push({
-            student,
-            average: data.average,
-            rank: data.isUnranked ? "NC" : data.rank,
-            isUnranked: data.isUnranked,
-          })
-        }
-      }
-
-      // Sort by average (ranked first, then NC)
-      previewData.sort((a, b) => {
-        if (!a.isUnranked && b.isUnranked) return -1
-        if (a.isUnranked && !b.isUnranked) return 1
-        return b.average - a.average
-      })
-
-      setClassPreviewData(previewData)
-    } catch (error) {
-      console.error("Error loading preview:", error)
-      toast.error("Erreur lors du chargement de l'aperçu")
-    } finally {
-      setLoadingClassPreview(false)
-    }
-  }
-
-  // Mass generation
+  // Generate mass bulletins
   const handleMassGeneration = async () => {
-    if (!selectedClass || !selectedPeriod) {
+    if (!selectedClass || !selectedPeriod || students.length === 0) {
       toast.error("Veuillez sélectionner une classe et une période")
       return
     }
 
     setMassGenerating(true)
-    toast.info("Génération des bulletins en cours...")
-
     try {
-      const period = periods.find((p) => p.id === selectedPeriod)
-      const currentClass = classes.find((c) => c.id === selectedClass)
-
-      const bulletinsData: BulletinData[] = []
+      // Generate all bulletins
+      const allBulletinsData: BulletinData[] = []
 
       for (const student of students) {
-        const data = await generateBulletinData(student.id)
+        const data = await generateBulletinDataForStudent(student.id)
         if (data) {
-          bulletinsData.push(createPdfData(data))
+          allBulletinsData.push(createPdfData(data))
         }
       }
 
-      if (bulletinsData.length === 0) {
-        toast.error("Aucun bulletin à générer")
-        return
-      }
+      // Sort by average (descending)
+      allBulletinsData.sort((a, b) => {
+        if (a.rank === "NC" && b.rank !== "NC") return 1
+        if (a.rank !== "NC" && b.rank === "NC") return -1
+        return (b.average || 0) - (a.average || 0)
+      })
 
-      await generateMassBulletinsPDF(bulletinsData, currentClass?.name || "", period?.name || "")
-      toast.success(`${bulletinsData.length} bulletins générés avec succès!`)
+      // Generate PDF
+      const className = classes.find((c) => c.id === selectedClass)?.name || "Classe"
+      const periodName = periods.find((p) => p.id === selectedPeriod)?.name || "Période"
+
+      await generateMassBulletinsPDF(allBulletinsData, `${className} - ${periodName}`)
+      toast.success(`${allBulletinsData.length} bulletins générés avec succès`)
     } catch (error) {
-      console.error("Error mass generating:", error)
-      toast.error("Erreur lors de la génération de masse")
+      console.error("Error generating mass bulletins:", error)
+      toast.error("Erreur lors de la génération")
     } finally {
       setMassGenerating(false)
     }
   }
 
-  // Get grade color class
-  const getGradeColorClass = (grade: number | undefined) => {
-    if (grade === undefined) return "text-gray-400"
-    if (grade < 10) return "text-red-600 font-bold"
-    if (grade < 12) return "text-yellow-600 font-bold"
-    if (grade < 15) return "text-blue-600 font-bold"
-    return "text-green-600 font-bold"
-  }
-
-  const filteredLevels = levels.filter((l) => l.section_id === selectedSection)
-  const filteredClasses = classes.filter((c) => c.level_id === selectedLevel)
+  const isEnglish = bulletinData?.section?.toLowerCase().includes("anglophone")
 
   return (
     <AppLayout>
-      <div className="container mx-auto py-6 space-y-6">
+      <div className="container mx-auto p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold">Bulletins de Notes</h1>
-            <p className="text-muted-foreground">Générez et téléchargez les bulletins des élèves</p>
+            <h1 className="text-3xl font-bold">{isEnglish ? "Report Cards" : "Bulletins de Notes"}</h1>
+            <p className="text-muted-foreground">
+              {isEnglish
+                ? "Generate and download student report cards"
+                : "Générez et téléchargez les bulletins des élèves"}
+            </p>
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* Selection Card */}
-          <Card className="lg:col-span-1">
-            <CardHeader>
-              <CardTitle>Sélection</CardTitle>
-              <CardDescription>Choisissez les paramètres du bulletin</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+        {/* Filters */}
+        <Card>
+          <CardHeader>
+            <CardTitle>{isEnglish ? "Filters" : "Filtres"}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-2">
-                <Label>Section</Label>
-                <Select
-                  value={selectedSection}
-                  onValueChange={(v) => {
-                    setSelectedSection(v)
-                    setSelectedLevel("")
-                    setSelectedClass("")
-                  }}
-                >
+                <Label>{isEnglish ? "Class" : "Classe"}</Label>
+                <Select value={selectedClass} onValueChange={setSelectedClass}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner une section" />
+                    <SelectValue placeholder={isEnglish ? "Select a class" : "Sélectionner une classe"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {sections.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Niveau</Label>
-                <Select
-                  value={selectedLevel}
-                  onValueChange={(v) => {
-                    setSelectedLevel(v)
-                    setSelectedClass("")
-                  }}
-                  disabled={!selectedSection}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner un niveau" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredLevels.map((l) => (
-                      <SelectItem key={l.id} value={l.id}>
-                        {l.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Classe</Label>
-                <Select value={selectedClass} onValueChange={setSelectedClass} disabled={!selectedLevel}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner une classe" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredClasses.map((c) => (
+                    {classes.map((c) => (
                       <SelectItem key={c.id} value={c.id}>
                         {c.name}
                       </SelectItem>
@@ -655,15 +735,23 @@ export default function BulletinsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Période</Label>
+                <Label>{isEnglish ? "Period" : "Période"}</Label>
                 <Select value={selectedPeriod} onValueChange={setSelectedPeriod}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner une période" />
+                    <SelectValue placeholder={isEnglish ? "Select a period" : "Sélectionner une période"} />
                   </SelectTrigger>
                   <SelectContent>
                     {periods.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.name} ({p.type === "trimester" ? "Trimestre" : "Séquence"})
+                        {p.name} (
+                        {p.type === "trimester"
+                          ? isEnglish
+                            ? "Term"
+                            : "Trimestre"
+                          : isEnglish
+                            ? "Sequence"
+                            : "Séquence"}
+                        )
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -671,265 +759,322 @@ export default function BulletinsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Élève</Label>
-                <Select
-                  value={selectedStudent}
-                  onValueChange={handleStudentSelect}
-                  disabled={!selectedClass || !selectedPeriod}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Sélectionner un élève" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {students.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.last_name} {s.first_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>{isEnglish ? "Search" : "Rechercher"}</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder={isEnglish ? "Search student..." : "Rechercher un élève..."}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
               </div>
+            </div>
 
-              {/* Actions */}
-              <div className="pt-4 space-y-2">
-                <Button
-                  onClick={() => setPreviewOpen(true)}
-                  disabled={!bulletinData || generating}
-                  className="w-full"
-                  variant="outline"
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  Aperçu individuel
-                </Button>
-
-                <Button onClick={handleDownloadPDF} disabled={!bulletinData || downloading} className="w-full">
-                  {downloading ? (
+            {selectedClass && selectedPeriod && (
+              <div className="mt-4 flex justify-end">
+                <Button onClick={handleMassGeneration} disabled={massGenerating || students.length === 0}>
+                  {massGenerating ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   ) : (
-                    <Download className="mr-2 h-4 w-4" />
+                    <Users className="mr-2 h-4 w-4" />
                   )}
-                  Télécharger PDF
+                  {isEnglish ? `Generate All (${students.length})` : `Générer Tous (${students.length})`}
                 </Button>
-
-                <div className="border-t pt-4 mt-4">
-                  <p className="text-sm text-muted-foreground mb-2">Actions de masse</p>
-
-                  <Button
-                    onClick={loadClassPreview}
-                    disabled={!selectedClass || !selectedPeriod || loadingClassPreview}
-                    className="w-full mb-2 bg-transparent"
-                    variant="outline"
-                  >
-                    {loadingClassPreview ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <FileText className="mr-2 h-4 w-4" />
-                    )}
-                    Aperçu toute la classe
-                  </Button>
-
-                  <Button
-                    onClick={handleMassGeneration}
-                    disabled={!selectedClass || !selectedPeriod || massGenerating}
-                    className="w-full"
-                    variant="secondary"
-                  >
-                    {massGenerating ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Users className="mr-2 h-4 w-4" />
-                    )}
-                    Générer toute la classe
-                  </Button>
-                </div>
               </div>
-            </CardContent>
-          </Card>
+            )}
+          </CardContent>
+        </Card>
 
-          {/* Preview Card */}
-          <Card className="lg:col-span-2">
-            <CardHeader>
-              <CardTitle>Aperçu</CardTitle>
-              <CardDescription>
-                {bulletinData
-                  ? `Bulletin de ${bulletinData.student.last_name} ${bulletinData.student.first_name}`
-                  : "Sélectionnez un élève pour voir l'aperçu"}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {generating ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                </div>
-              ) : bulletinData ? (
-                <div className="space-y-4">
-                  {/* Student Info */}
-                  <div className="grid grid-cols-2 gap-4 p-4 bg-muted/50 rounded-lg">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Nom</p>
-                      <p className="font-medium">
-                        {bulletinData.student.last_name} {bulletinData.student.first_name}
-                      </p>
+        {/* Students List */}
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              {isEnglish ? "Students" : "Élèves"} ({filteredStudents.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loading ? (
+              <div className="space-y-2">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : filteredStudents.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                {selectedClass
+                  ? isEnglish
+                    ? "No students found"
+                    : "Aucun élève trouvé"
+                  : isEnglish
+                    ? "Select a class to view students"
+                    : "Sélectionnez une classe pour voir les élèves"}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredStudents.map((student) => (
+                  <div
+                    key={student.id}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <span className="text-sm font-medium text-primary">
+                          {student.first_name[0]}
+                          {student.last_name[0]}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="font-medium">
+                          {student.last_name} {student.first_name}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{student.matricule}</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Classe</p>
-                      <p className="font-medium">{bulletinData.student.class?.name}</p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Moyenne</p>
-                      <p className={`font-bold text-lg ${getGradeColorClass(bulletinData.average)}`}>
-                        {bulletinData.average.toFixed(2)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-sm text-muted-foreground">Rang</p>
-                      <p className="font-bold text-lg">
-                        {bulletinData.isUnranked ? "NC" : `${bulletinData.rank}/${bulletinData.classSize}`}
-                      </p>
-                    </div>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => generateBulletin(student.id)}
+                      disabled={generating || !selectedPeriod}
+                    >
+                      {generating && selectedStudent === student.id ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Eye className="mr-2 h-4 w-4" />
+                      )}
+                      {isEnglish ? "View" : "Voir"}
+                    </Button>
                   </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-                  {/* Grades Table */}
-                  <div className="border rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-primary text-primary-foreground">
-                        <tr>
-                          <th className="text-left p-2">Matière</th>
-                          <th className="text-center p-2">Coef</th>
-                          <th className="text-center p-2">Note</th>
-                          <th className="text-center p-2">Rang</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {bulletinData.subjects.map((subj: any, idx: number) => {
-                          const score = bulletinData.grades?.[subj.id]?.score
-                          const subjRank = bulletinData.subjectRanks?.[subj.id]
-                          return (
-                            <tr key={subj.id} className={idx % 2 === 0 ? "bg-white" : "bg-muted/30"}>
-                              <td className="p-2">{subj.name}</td>
-                              <td className="text-center p-2">{subj.coefficient}</td>
-                              <td className={`text-center p-2 ${getGradeColorClass(score)}`}>
-                                {score !== undefined ? score.toFixed(2) : "-"}
-                              </td>
-                              <td className="text-center p-2">
-                                {subjRank ? `${subjRank.rank}/${subjRank.classSize}` : "-"}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-                  <FileText className="h-12 w-12 mb-4 opacity-50" />
-                  <p>Sélectionnez un élève pour générer son bulletin</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Individual Preview Dialog */}
-        <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
+        {/* Bulletin Preview Dialog */}
+        <Dialog open={showBulletin} onOpenChange={setShowBulletin}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Aperçu du Bulletin</DialogTitle>
+              <DialogTitle>{isEnglish ? "Report Card Preview" : "Aperçu du Bulletin"}</DialogTitle>
             </DialogHeader>
+
             {bulletinData && (
               <div className="space-y-4">
+                {/* Header */}
                 <div className="text-center border-b pb-4">
-                  <h2 className="text-xl font-bold">{schoolSettings?.school_name || "HARMONY School"}</h2>
-                  <p className="text-muted-foreground">{schoolSettings?.school_slogan}</p>
+                  <h2 className="text-xl font-bold">{schoolSettings?.school_name}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {bulletinData.period.type === "trimester"
+                      ? isEnglish
+                        ? "TERM REPORT CARD"
+                        : "BULLETIN TRIMESTRIEL"
+                      : isEnglish
+                        ? "SEQUENCE REPORT CARD"
+                        : "BULLETIN SÉQUENTIEL"}
+                  </p>
+                  <p className="text-sm">
+                    {bulletinData.period.name} - {bulletinData.period.academic_year}
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                {/* Student Info */}
+                <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
                     <p>
-                      <strong>Nom:</strong> {bulletinData.student.last_name} {bulletinData.student.first_name}
+                      <strong>{isEnglish ? "Name:" : "Nom:"}</strong> {bulletinData.student.last_name}{" "}
+                      {bulletinData.student.first_name}
                     </p>
                     <p>
-                      <strong>Matricule:</strong> {bulletinData.student.matricule || "-"}
+                      <strong>{isEnglish ? "Registration:" : "Matricule:"}</strong> {bulletinData.student.matricule}
+                    </p>
+                    <p>
+                      <strong>{isEnglish ? "Class:" : "Classe:"}</strong> {bulletinData.student.class?.name}
                     </p>
                   </div>
                   <div>
                     <p>
-                      <strong>Classe:</strong> {bulletinData.student.class?.name}
+                      <strong>{isEnglish ? "Date of Birth:" : "Date de Naissance:"}</strong>{" "}
+                      {bulletinData.student.date_of_birth || "-"}
                     </p>
                     <p>
-                      <strong>Période:</strong> {periods.find((p) => p.id === selectedPeriod)?.name}
+                      <strong>{isEnglish ? "Gender:" : "Sexe:"}</strong>{" "}
+                      {bulletinData.student.gender === "M"
+                        ? isEnglish
+                          ? "Male"
+                          : "Masculin"
+                        : isEnglish
+                          ? "Female"
+                          : "Féminin"}
                     </p>
                   </div>
                 </div>
 
-                <table className="w-full border text-sm">
-                  <thead className="bg-primary text-primary-foreground">
-                    <tr>
-                      <th className="border p-2 text-left">Matière</th>
-                      <th className="border p-2">Enseignant</th>
-                      <th className="border p-2">Coef</th>
-                      {periods.find((p) => p.id === selectedPeriod)?.type === "trimester" && (
-                        <>
-                          <th className="border p-2">Séq 1</th>
-                          <th className="border p-2">Séq 2</th>
-                        </>
-                      )}
-                      <th className="border p-2">Moy</th>
-                      <th className="border p-2">Rang</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bulletinData.subjects.map((subj: any) => {
-                      const score = bulletinData.grades?.[subj.id]?.score
-                      const seq1 = bulletinData.sequenceGrades?.seq1?.[subj.id]
-                      const seq2 = bulletinData.sequenceGrades?.seq2?.[subj.id]
-                      const subjRank = bulletinData.subjectRanks?.[subj.id]
-                      const isTrimester = periods.find((p) => p.id === selectedPeriod)?.type === "trimester"
-
-                      return (
-                        <tr key={subj.id}>
-                          <td className="border p-2">{subj.name}</td>
-                          <td className="border p-2 text-center">{subj.teacher_name || "-"}</td>
-                          <td className="border p-2 text-center">{subj.coefficient}</td>
-                          {isTrimester && (
-                            <>
-                              <td className={`border p-2 text-center ${getGradeColorClass(seq1)}`}>
-                                {seq1 !== undefined ? seq1.toFixed(2) : "-"}
+                {/* Grades Table */}
+                <div className="border rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted">
+                      <tr>
+                        <th className="text-left p-2 border-r">{isEnglish ? "Subject" : "Matière"}</th>
+                        <th className="p-2 border-r w-12">{isEnglish ? "Coef" : "Coef"}</th>
+                        {bulletinData.period.type === "trimester" && (
+                          <>
+                            <th className="p-2 border-r w-16">Séq 1</th>
+                            <th className="p-2 border-r w-16">Séq 2</th>
+                          </>
+                        )}
+                        <th className="p-2 border-r w-16">{isEnglish ? "Avg" : "Moy"}</th>
+                        <th className="p-2 w-20">{isEnglish ? "Rank" : "Rang"}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const groups = [...new Set(bulletinData.subjects.map((s) => s.group_name))]
+                        return groups.map((group) => (
+                          <>
+                            <tr key={`group-${group}`} className="bg-muted/50">
+                              <td
+                                colSpan={bulletinData.period.type === "trimester" ? 6 : 4}
+                                className="p-2 font-semibold"
+                              >
+                                {group}
                               </td>
-                              <td className={`border p-2 text-center ${getGradeColorClass(seq2)}`}>
-                                {seq2 !== undefined ? seq2.toFixed(2) : "-"}
-                              </td>
-                            </>
-                          )}
-                          <td className={`border p-2 text-center ${getGradeColorClass(score)}`}>
-                            {score !== undefined ? score.toFixed(2) : "-"}
-                          </td>
-                          <td className="border p-2 text-center">
-                            {subjRank ? `${subjRank.rank}/${subjRank.classSize}` : "-"}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                  <tfoot className="bg-primary/10">
-                    <tr>
-                      <td
-                        colSpan={periods.find((p) => p.id === selectedPeriod)?.type === "trimester" ? 5 : 3}
-                        className="border p-2 font-bold"
-                      >
-                        Résultats
-                      </td>
-                      <td className={`border p-2 text-center font-bold ${getGradeColorClass(bulletinData.average)}`}>
-                        {bulletinData.average.toFixed(2)}
-                      </td>
-                      <td className="border p-2 text-center font-bold">
-                        {bulletinData.isUnranked ? "NC" : `${bulletinData.rank}/${bulletinData.classSize}`}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+                            </tr>
+                            {bulletinData.subjects
+                              .filter((s) => s.group_name === group)
+                              .map((subject) => {
+                                const grade = bulletinData.grades[subject.id]
+                                const seq1 = bulletinData.sequenceGrades?.seq1[subject.id]
+                                const seq2 = bulletinData.sequenceGrades?.seq2[subject.id]
+                                const subjectRank = bulletinData.subjectRanks?.[subject.id]
 
+                                return (
+                                  <tr key={subject.id} className="border-t">
+                                    <td className="p-2 border-r">
+                                      {subject.name}
+                                      {subject.teacher_name && (
+                                        <span className="text-xs text-muted-foreground ml-1">
+                                          ({subject.teacher_name})
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="p-2 border-r text-center">{subject.coefficient}</td>
+                                    {bulletinData.period.type === "trimester" && (
+                                      <>
+                                        <td className={cn("p-2 border-r text-center font-medium", getGradeColor(seq1))}>
+                                          {seq1 !== undefined ? seq1.toFixed(2) : "-"}
+                                        </td>
+                                        <td className={cn("p-2 border-r text-center font-medium", getGradeColor(seq2))}>
+                                          {seq2 !== undefined ? seq2.toFixed(2) : "-"}
+                                        </td>
+                                      </>
+                                    )}
+                                    <td
+                                      className={cn("p-2 border-r text-center font-bold", getGradeColor(grade?.score))}
+                                    >
+                                      {grade?.score !== undefined ? grade.score.toFixed(2) : "-"}
+                                    </td>
+                                    <td className="p-2 text-center">
+                                      {subjectRank ? `${subjectRank.rank}/${subjectRank.classSize}` : "-"}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            {bulletinData.groupAverages[group] !== undefined && (
+                              <tr className="bg-muted/30 font-semibold">
+                                <td
+                                  className="p-2 border-r text-right"
+                                  colSpan={bulletinData.period.type === "trimester" ? 4 : 2}
+                                >
+                                  {isEnglish ? "Group Average:" : "Moyenne du Groupe:"}
+                                </td>
+                                <td
+                                  className={cn(
+                                    "p-2 border-r text-center",
+                                    getGradeColor(bulletinData.groupAverages[group]),
+                                  )}
+                                >
+                                  {bulletinData.groupAverages[group].toFixed(2)}
+                                </td>
+                                <td className="p-2"></td>
+                              </tr>
+                            )}
+                          </>
+                        ))
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Summary */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-4 bg-muted rounded-lg text-center">
+                    <p className="text-sm text-muted-foreground">{isEnglish ? "Average" : "Moyenne"}</p>
+                    <p className={cn("text-2xl font-bold", getGradeColor(bulletinData.average))}>
+                      {bulletinData.average.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-muted rounded-lg text-center">
+                    <p className="text-sm text-muted-foreground">{isEnglish ? "Rank" : "Rang"}</p>
+                    <p className="text-2xl font-bold">
+                      {bulletinData.isUnranked ? "NC" : `${bulletinData.rank}/${bulletinData.classSize}`}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-muted rounded-lg text-center">
+                    <p className="text-sm text-muted-foreground">{isEnglish ? "Class Average" : "Moy. Classe"}</p>
+                    <p className="text-2xl font-bold">{bulletinData.classAverage.toFixed(2)}</p>
+                  </div>
+                  <div className="p-4 bg-muted rounded-lg text-center">
+                    <p className="text-sm text-muted-foreground">{isEnglish ? "Appreciation" : "Appréciation"}</p>
+                    <p className="text-lg font-bold">{getAppreciation(bulletinData.average, !!isEnglish)}</p>
+                  </div>
+                </div>
+
+                {/* Attendance (for trimester) */}
+                {bulletinData.attendance && (
+                  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <h3 className="font-semibold mb-2">{isEnglish ? "Attendance" : "Absences"}</h3>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <p>
+                        <strong>Total:</strong> {bulletinData.attendance.total_hours}h
+                      </p>
+                      <p>
+                        <strong>{isEnglish ? "Justified:" : "Justifiées:"}</strong>{" "}
+                        {bulletinData.attendance.justified_hours}h
+                      </p>
+                      <p>
+                        <strong>{isEnglish ? "Unjustified:" : "Non Justifiées:"}</strong>{" "}
+                        {bulletinData.attendance.unjustified_hours}h
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sequence Averages (for trimester) */}
+                {bulletinData.period.type === "trimester" && (
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h3 className="font-semibold mb-2">
+                      {isEnglish ? "Sequence Summary" : "Récapitulatif des Séquences"}
+                    </h3>
+                    <div className="grid grid-cols-3 gap-4 text-sm">
+                      <p>
+                        <strong>Séq 1:</strong> {bulletinData.seq1Average?.toFixed(2) || "-"}
+                      </p>
+                      <p>
+                        <strong>Séq 2:</strong> {bulletinData.seq2Average?.toFixed(2) || "-"}
+                      </p>
+                      <p>
+                        <strong>{isEnglish ? "Evolution:" : "Évolution:"}</strong>{" "}
+                        {bulletinData.seq1Average && bulletinData.seq2Average
+                          ? `${(((bulletinData.seq2Average - bulletinData.seq1Average) / bulletinData.seq1Average) * 100).toFixed(1)}%`
+                          : "-"}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Download Button */}
                 <div className="flex justify-end">
                   <Button onClick={handleDownloadPDF} disabled={downloading}>
                     {downloading ? (
@@ -937,89 +1082,7 @@ export default function BulletinsPage() {
                     ) : (
                       <Download className="mr-2 h-4 w-4" />
                     )}
-                    Télécharger PDF
-                  </Button>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={classPreviewOpen} onOpenChange={setClassPreviewOpen}>
-          <DialogContent className="max-w-5xl max-h-[90vh] overflow-auto">
-            <DialogHeader>
-              <DialogTitle>
-                Aperçu des bulletins - {classes.find((c) => c.id === selectedClass)?.name} -{" "}
-                {periods.find((p) => p.id === selectedPeriod)?.name}
-              </DialogTitle>
-            </DialogHeader>
-
-            {loadingClassPreview ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                <span className="ml-2">Chargement des données...</span>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="border rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-primary text-primary-foreground">
-                      <tr>
-                        <th className="text-center p-3 w-16">Rang</th>
-                        <th className="text-left p-3">Nom & Prénom</th>
-                        <th className="text-center p-3">Matricule</th>
-                        <th className="text-center p-3">Moyenne</th>
-                        <th className="text-center p-3">Statut</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {classPreviewData.map((item, idx) => (
-                        <tr key={item.student.id} className={idx % 2 === 0 ? "bg-white" : "bg-muted/30"}>
-                          <td className="text-center p-3 font-bold">
-                            {item.isUnranked ? (
-                              <span className="text-orange-500">NC</span>
-                            ) : (
-                              <span className={item.rank <= 3 ? "text-green-600" : ""}>{item.rank}</span>
-                            )}
-                          </td>
-                          <td className="p-3 font-medium">
-                            {item.student.last_name.toUpperCase()} {item.student.first_name}
-                          </td>
-                          <td className="text-center p-3">{item.student.matricule || "-"}</td>
-                          <td className={`text-center p-3 font-bold ${getGradeColorClass(item.average)}`}>
-                            {item.average.toFixed(2)}
-                          </td>
-                          <td className="text-center p-3">
-                            {item.isUnranked ? (
-                              <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded text-xs">
-                                Non Classé
-                              </span>
-                            ) : item.average >= 10 ? (
-                              <span className="px-2 py-1 bg-green-100 text-green-700 rounded text-xs">Admis</span>
-                            ) : (
-                              <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs">Non Admis</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t">
-                  <div className="text-sm text-muted-foreground">
-                    Total: {classPreviewData.length} élèves | Admis:{" "}
-                    {classPreviewData.filter((s) => !s.isUnranked && s.average >= 10).length} | Non Admis:{" "}
-                    {classPreviewData.filter((s) => !s.isUnranked && s.average < 10).length} | NC:{" "}
-                    {classPreviewData.filter((s) => s.isUnranked).length}
-                  </div>
-                  <Button onClick={handleMassGeneration} disabled={massGenerating}>
-                    {massGenerating ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Download className="mr-2 h-4 w-4" />
-                    )}
-                    Générer tous les PDF
+                    {isEnglish ? "Download PDF" : "Télécharger PDF"}
                   </Button>
                 </div>
               </div>
