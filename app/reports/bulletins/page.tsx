@@ -253,7 +253,7 @@ export default function BulletinsPage() {
               name: ls.subject.name,
               coefficient: ls.coefficient || 1,
               group_name: ls.subject.group?.name || "Autres",
-              teacher_name: ls.teacher ? `${ls.teacher.first_name} ${ls.teacher.last_name}` : undefined,
+              teacher_name: ls.teacher ? `${ls.teacher.first_name} ${ls.teacher.last_name}` : undefined, // Corrected cs to ls here
             })
             addedSubjectIds.add(ls.subject.id)
           }
@@ -739,10 +739,13 @@ export default function BulletinsPage() {
     toast.info("Génération des bulletins en cours...")
 
     try {
+      // Fetch all bulletin data in parallel for better performance
+      const bulletinPromises = students.map((student) => generateBulletinData(student.id))
+      const allBulletinData = await Promise.all(bulletinPromises)
+
       const bulletinsData: any[] = []
 
-      for (const student of students) {
-        const data = await generateBulletinData(student.id)
+      for (const data of allBulletinData) {
         if (data) {
           const pdfData = {
             schoolName: schoolSettings?.school_name || "HARMONY School",
@@ -753,9 +756,6 @@ export default function BulletinsPage() {
             logoUrl: schoolSettings?.logo_url || "",
             academicYear: schoolSettings?.current_academic_year || "2024-2025",
             className: data.student.class?.name || "",
-            // Assuming section and level are available in schoolSettings or student data if needed
-            // section: "Francophone",
-            // level: "Moyenne",
             periodName: data.period.name,
             periodType: data.period.type,
             student: {
@@ -789,7 +789,17 @@ export default function BulletinsPage() {
             distinction: getDistinction(data.average),
             attendance: data.attendance,
             periods: [data.period],
-            section: data.section, // Added section
+            section: data.section,
+            schoolSettings: {
+              school_name: schoolSettings?.school_name || "",
+              school_slogan: schoolSettings?.school_slogan || "",
+              address: schoolSettings?.address || "",
+              phone: schoolSettings?.phone || "",
+              email: schoolSettings?.email || "",
+              logo_url: schoolSettings?.logo_url || "",
+              po_box: schoolSettings?.po_box || "",
+              current_academic_year: schoolSettings?.current_academic_year || "",
+            },
           }
           bulletinsData.push(pdfData)
         }

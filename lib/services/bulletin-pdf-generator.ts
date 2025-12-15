@@ -1,6 +1,4 @@
 "use client"
-
-import jsPDF from "jspdf"
 import type { SchoolSettings, Subject } from "./types" // Declare SchoolSettings and Subject types
 
 type BulletinData = {
@@ -47,6 +45,35 @@ type BulletinData = {
   schoolInfo?: {
     poBox?: string
     logo?: string
+  }
+}
+
+let cachedLogo: HTMLImageElement | null = null
+let cachedLogoUrl: string | null = null
+
+async function loadLogo(logoUrl: string): Promise<HTMLImageElement | null> {
+  if (!logoUrl) return null
+
+  // Return cached logo if URL matches
+  if (cachedLogoUrl === logoUrl && cachedLogo) {
+    return cachedLogo
+  }
+
+  try {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error("Failed to load logo"))
+      // Add timeout to prevent hanging
+      setTimeout(() => reject(new Error("Logo load timeout")), 3000)
+      img.src = logoUrl
+    })
+    cachedLogo = img
+    cachedLogoUrl = logoUrl
+    return img
+  } catch {
+    return null
   }
 }
 
@@ -209,14 +236,39 @@ function generateIntelligentObservation(
   return observations.join(" ")
 }
 
+// Helper function to draw fallback logo
+function drawFallbackLogo(pdf: any, centerX: number, y: number, schoolSettings: any) {
+  pdf.setFillColor(30, 64, 175)
+  pdf.circle(centerX, y + 14, 12, "F")
+  pdf.setFillColor(255, 255, 255)
+  pdf.circle(centerX, y + 14, 10.5, "F")
+  pdf.setFillColor(30, 64, 175)
+  pdf.circle(centerX, y + 14, 9, "F")
+  pdf.setTextColor(255, 255, 255)
+  pdf.setFontSize(7)
+  pdf.setFont("helvetica", "bold")
+  const initials = (schoolSettings?.school_name || "H")
+    .split(" ")
+    .map((w: string) => w[0])
+    .join("")
+    .substring(0, 4)
+  pdf.text(initials, centerX, y + 16, { align: "center" })
+}
+
 function generateSingleBulletin(
-  pdf: jsPDF,
-  bulletinData: BulletinData,
-  schoolSettings: SchoolSettings,
-  isFirstPage = true,
+  pdf: any,
+  bulletinData: any,
+  schoolSettings: any,
+  isFirstPage = false,
+  preloadedLogo: HTMLImageElement | null = null,
 ): void {
-  const pageWidth = 210
-  const pageHeight = 297
+  if (!isFirstPage) {
+    pdf.addPage()
+  }
+
+  const isAnglophone = bulletinData.isAnglophone || bulletinData.section?.toLowerCase().includes("anglo")
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
   const margin = 8
   const contentWidth = pageWidth - margin * 2
 
@@ -233,593 +285,434 @@ function generateSingleBulletin(
     distinction = "",
   } = bulletinData || {}
 
-  const safeAverage = numOrZero(average)
-  const safeRank = numOrZero(rank) || 1
-  const safeClassSize = numOrZero(classSize) || 1
-  const safeClassAverage = numOrZero(classAverage)
-  const isTrimestriel = period?.type === "trimester"
-
-  if (!isFirstPage) {
-    pdf.addPage()
+  const safeNum = (val: any): number => {
+    const n = Number(val)
+    return isNaN(n) ? 0 : n
   }
 
-  // ===== WATERMARK =====
-  pdf.setTextColor(235, 235, 235)
-  pdf.setFontSize(45)
+  const numOrZero = (val: any): number => safeNum(val)
+
+  // Watermark
+  pdf.setTextColor(200, 200, 200)
+  pdf.setFontSize(50)
   pdf.setFont("helvetica", "bold")
-  pdf.text(schoolSettings?.school_name || "HARMONY", pageWidth / 2, pageHeight / 2, {
+  const watermarkText = schoolSettings?.school_name || "HARMONY"
+  pdf.text(watermarkText, pageWidth / 2, pageHeight / 2, {
     align: "center",
     angle: 45,
   })
 
-  // ===== HEADER =====
+  // Header
   let y = margin
-  const headerHeight = 32
-
   pdf.setFillColor(252, 251, 248)
-  pdf.rect(0, 0, pageWidth, headerHeight + margin, "F")
+  pdf.rect(margin, y, contentWidth, 35, "F")
+  pdf.setDrawColor(30, 64, 175)
+  pdf.setLineWidth(0.5)
+  pdf.rect(margin, y, contentWidth, 35, "S")
 
-  const poBox = schoolSettings?.address || ".................."
-  const tel = schoolSettings?.phone || ".................."
-
+  const leftColX = margin + 3
+  const rightColX = pageWidth - margin - 55
   const centerX = pageWidth / 2
-  const leftColX = margin + 2
-  const rightColX = pageWidth - margin - 45
 
   // Left column - French
-  pdf.setTextColor(30, 64, 175)
+  pdf.setTextColor(0, 0, 0)
   pdf.setFontSize(6)
   pdf.setFont("helvetica", "bold")
-  pdf.text("REPUBLIQUE DU CAMEROUN", leftColX, y + 5)
-  pdf.setFontSize(5)
+  pdf.text("REPUBLIQUE DU CAMEROUN", leftColX, y + 4)
   pdf.setFont("helvetica", "italic")
-  pdf.text("Paix - Travail - Patrie", leftColX, y + 9)
-  pdf.setFontSize(4)
-  pdf.text("**********", leftColX, y + 12)
-  pdf.setFontSize(5)
+  pdf.text("Paix - Travail - Patrie", leftColX, y + 7)
+  pdf.text("**********", leftColX, y + 10)
   pdf.setFont("helvetica", "bold")
-  pdf.text("MINISTERE DES ENSEIGNEMENTS", leftColX, y + 16)
-  pdf.text("SECONDAIRES", leftColX, y + 20)
-  pdf.setFontSize(4)
-  pdf.text("**********", leftColX, y + 23)
-  pdf.setFontSize(4)
+  pdf.text("MINISTERE DES ENSEIGNEMENTS", leftColX, y + 13)
+  pdf.text("SECONDAIRES", leftColX, y + 16)
+  pdf.text("**********", leftColX, y + 19)
+  pdf.setFontSize(5)
+  pdf.text(schoolSettings?.school_name || "HARMONY School", leftColX, y + 22)
+  pdf.text("**********", leftColX, y + 25)
+
+  const poBox = schoolSettings?.po_box || "BP: ..."
+  const tel = schoolSettings?.phone || "Tél: ..."
   pdf.setFont("helvetica", "normal")
-  pdf.text(`BP: ${poBox}`, leftColX, y + 27)
-  pdf.text(`Tél: ${tel}`, leftColX, y + 30)
+  pdf.text(`BP: ${poBox}`, leftColX, y + 28)
+  pdf.text(`Tél: ${tel}`, leftColX, y + 31)
 
-  // Center - Logo
-  pdf.setFillColor(30, 64, 175)
-  pdf.circle(centerX, y + 15, 10, "F")
-  pdf.setFillColor(255, 255, 255)
-  pdf.circle(centerX, y + 15, 8.5, "F")
-  pdf.setFillColor(30, 64, 175)
-  pdf.circle(centerX, y + 15, 7, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  const initials = (schoolSettings?.school_name || "H")
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .substring(0, 3)
-  pdf.text(initials, centerX, y + 17, { align: "center" })
-
-  // School name below logo
-  pdf.setTextColor(30, 64, 175)
-  pdf.setFontSize(5)
-  pdf.text(schoolSettings?.school_name || "COLLEGE", centerX, y + 28, { align: "center", maxWidth: 50 })
-  pdf.setFontSize(4)
-  pdf.setFont("helvetica", "italic")
-  pdf.text(schoolSettings?.school_slogan || "", centerX, y + 32, { align: "center" })
+  // Center - Logo (use pre-loaded logo if available)
+  if (preloadedLogo) {
+    try {
+      pdf.addImage(preloadedLogo, "PNG", centerX - 12, y + 2, 24, 24)
+    } catch {
+      drawFallbackLogo(pdf, centerX, y, schoolSettings)
+    }
+  } else {
+    drawFallbackLogo(pdf, centerX, y, schoolSettings)
+  }
 
   // Right column - English
-  pdf.setTextColor(30, 64, 175)
   pdf.setFontSize(6)
   pdf.setFont("helvetica", "bold")
-  pdf.text("REPUBLIC OF CAMEROON", rightColX, y + 5)
-  pdf.setFontSize(5)
+  pdf.text("REPUBLIC OF CAMEROON", rightColX, y + 4)
   pdf.setFont("helvetica", "italic")
-  pdf.text("Peace - Work - Fatherland", rightColX, y + 9)
-  pdf.setFontSize(4)
-  pdf.text("**********", rightColX, y + 12)
+  pdf.text("Peace - Work - Fatherland", rightColX, y + 7)
+  pdf.text("**********", rightColX, y + 10)
+  pdf.setFont("helvetica", "bold")
+  pdf.text("MINISTRY OF SECONDARY", rightColX, y + 13)
+  pdf.text("EDUCATION", rightColX, y + 16)
+  pdf.text("**********", rightColX, y + 19)
   pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("MINISTRY OF SECONDARY", rightColX, y + 16)
-  pdf.text("EDUCATION", rightColX, y + 20)
-  pdf.setFontSize(4)
-  pdf.text("**********", rightColX, y + 23)
-  pdf.setFontSize(4)
+  pdf.text(schoolSettings?.school_name || "HARMONY School", rightColX, y + 22)
+  pdf.text("**********", rightColX, y + 25)
   pdf.setFont("helvetica", "normal")
-  pdf.text(`PO.BOX: ${poBox}`, rightColX, y + 27)
-  pdf.text(`Tel: ${tel}`, rightColX, y + 30)
+  pdf.text(`PO.BOX: ${poBox}`, rightColX, y + 28)
+  pdf.text(`Tel: ${tel}`, rightColX, y + 31)
 
-  // Academic year badge
+  y += 38
+
+  // Title
+  const bulletinTitle = isAnglophone ? "REPORT CARD" : "BULLETIN DE NOTES"
+  const periodLabel = period?.name || ""
+  const yearLabel = schoolSettings?.current_academic_year || "2024-2025"
+
   pdf.setFillColor(30, 64, 175)
-  pdf.roundedRect(pageWidth - margin - 22, y + 1, 20, 6, 1.5, 1.5, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  pdf.text(period?.academic_year || "2024-2025", pageWidth - margin - 12, y + 5, { align: "center" })
-
-  y += headerHeight + 2
-
-  // TITLE
-  pdf.setFillColor(30, 64, 175)
-  pdf.roundedRect(centerX - 28, y, 56, 8, 1.5, 1.5, "FD")
+  pdf.roundedRect(margin + 30, y, contentWidth - 60, 8, 2, 2, "F")
   pdf.setTextColor(255, 255, 255)
   pdf.setFontSize(10)
   pdf.setFont("helvetica", "bold")
-  pdf.text("BULLETIN DE NOTES", centerX, y + 5.5, { align: "center" })
+  pdf.text(`${bulletinTitle} - ${periodLabel} - ${yearLabel}`, pageWidth / 2, y + 5.5, { align: "center" })
 
-  y += 10
+  y += 12
 
-  pdf.setTextColor(30, 64, 175)
-  pdf.setFontSize(9)
-  pdf.text(period?.name || "Période", centerX, y + 2, { align: "center" })
+  // Student info section
+  pdf.setFillColor(240, 240, 240)
+  pdf.rect(margin, y, contentWidth, 18, "F")
+  pdf.setDrawColor(200, 200, 200)
+  pdf.rect(margin, y, contentWidth, 18, "S")
 
-  y += 6
-
-  // ===== STUDENT INFO =====
-  const infoBoxHeight = 18
-  pdf.setFillColor(248, 250, 252)
-  pdf.setDrawColor(203, 213, 225)
-  pdf.setLineWidth(0.2)
-  pdf.roundedRect(margin, y, contentWidth, infoBoxHeight, 1.5, 1.5, "FD")
-
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("NOM ET PRENOM:", margin + 3, y + 5)
-  pdf.setTextColor(30, 41, 59)
-  pdf.setFontSize(9)
-  pdf.text(`${(student?.last_name || "").toUpperCase()} ${student?.first_name || ""}`, margin + 32, y + 5)
-
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("MATRICULE:", margin + 3, y + 10)
-  pdf.setTextColor(30, 41, 59)
+  pdf.setTextColor(0, 0, 0)
   pdf.setFontSize(8)
-  pdf.text(student?.matricule || "-", margin + 24, y + 10)
+  pdf.setFont("helvetica", "bold")
 
-  pdf.setTextColor(100, 116, 139)
+  const nameLabel = isAnglophone ? "Name:" : "Nom:"
+  const matriculeLabel = isAnglophone ? "Reg. No:" : "Matricule:"
+  const classLabel = isAnglophone ? "Class:" : "Classe:"
+  const bornLabel = isAnglophone ? "Born on:" : "Né(e) le:"
+  const atLabel = isAnglophone ? "at" : "à"
+  const genderLabel = isAnglophone ? "Gender:" : "Sexe:"
+  const totalLabel = isAnglophone ? "Total:" : "Effectif:"
+
+  const studentName = `${student.lastName || ""} ${student.firstName || ""}`.toUpperCase()
+  pdf.text(`${nameLabel} ${studentName}`, margin + 3, y + 5)
+  pdf.text(`${matriculeLabel} ${student.matricule || "N/A"}`, margin + 3, y + 10)
+  pdf.text(`${classLabel} ${bulletinData.className || ""}`, margin + 3, y + 15)
+
+  pdf.text(
+    `${bornLabel} ${student.dateOfBirth || "N/A"} ${atLabel} ${student.placeOfBirth || "N/A"}`,
+    margin + 100,
+    y + 5,
+  )
+  pdf.text(
+    `${genderLabel} ${student.gender === "M" ? (isAnglophone ? "Male" : "Masculin") : isAnglophone ? "Female" : "Féminin"}`,
+    margin + 100,
+    y + 10,
+  )
+  pdf.text(`${totalLabel} ${numOrZero(classSize)}`, margin + 100, y + 15)
+
+  y += 22
+
+  // Determine if trimester (show seq1, seq2, avg columns)
+  const isTrimester = period?.type === "trimester"
+  const rowHeight = 5
+  const headerHeight = 6
+
+  // Table headers
+  const cols = isTrimester
+    ? [
+        { label: isAnglophone ? "Subject" : "Matière", width: 45 },
+        { label: isAnglophone ? "Teacher" : "Enseignant", width: 30 },
+        { label: "Coef", width: 10 },
+        { label: "Seq 1", width: 12 },
+        { label: "Seq 2", width: 12 },
+        { label: isAnglophone ? "Avg" : "Moy", width: 12 },
+        { label: "/20", width: 12 },
+        { label: isAnglophone ? "Rank" : "Rang", width: 15 },
+        { label: isAnglophone ? "Remark" : "Appréciation", width: 46 },
+      ]
+    : [
+        { label: isAnglophone ? "Subject" : "Matière", width: 50 },
+        { label: isAnglophone ? "Teacher" : "Enseignant", width: 35 },
+        { label: "Coef", width: 12 },
+        { label: isAnglophone ? "Score" : "Note", width: 15 },
+        { label: "/20", width: 15 },
+        { label: isAnglophone ? "Rank" : "Rang", width: 18 },
+        { label: isAnglophone ? "Remark" : "Appréciation", width: 49 },
+      ]
+
+  // Draw header
+  pdf.setFillColor(30, 64, 175)
+  pdf.rect(margin, y, contentWidth, headerHeight, "F")
+  pdf.setTextColor(255, 255, 255)
   pdf.setFontSize(6)
   pdf.setFont("helvetica", "bold")
-  pdf.text("NÉ(E) LE:", margin + 3, y + 15)
-  pdf.setTextColor(30, 41, 59)
-  pdf.setFontSize(7)
-  const dob = student?.date_of_birth ? new Date(student.date_of_birth).toLocaleDateString("fr-FR") : "-"
-  pdf.text(`${dob} à ${student?.place_of_birth || "-"}`, margin + 18, y + 15)
 
-  const rightInfoX = margin + contentWidth / 2
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("CLASSE:", rightInfoX, y + 5)
-  pdf.setTextColor(30, 41, 59)
-  pdf.setFontSize(9)
-  pdf.text(bulletinData?.class?.name || "-", rightInfoX + 15, y + 5)
-
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("EFFECTIF:", rightInfoX, y + 10)
-  pdf.setTextColor(30, 41, 59)
-  pdf.setFontSize(8)
-  pdf.text(`${safeClassSize} élèves`, rightInfoX + 17, y + 10)
-
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(6)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("SEXE:", rightInfoX, y + 15)
-  pdf.setTextColor(30, 41, 59)
-  pdf.setFontSize(7)
-  pdf.text(student?.gender === "M" ? "Masculin" : student?.gender === "F" ? "Féminin" : "-", rightInfoX + 12, y + 15)
-
-  y += infoBoxHeight + 3
-
-  // ===== GRADES TABLE =====
-  const subjectsByGroup: Record<string, Subject[]> = {}
-  ;(subjects || []).forEach((s) => {
-    const groupName = s?.group || "Autres"
-    if (!subjectsByGroup[groupName]) subjectsByGroup[groupName] = []
-    subjectsByGroup[groupName].push(s)
+  let xPos = margin
+  cols.forEach((col) => {
+    pdf.text(col.label, xPos + col.width / 2, y + 4, { align: "center" })
+    xPos += col.width
   })
 
-  const groups = Object.keys(subjectsByGroup)
-  const tableHeaderHeight = 6
-  const rowHeight = 5
-  const groupHeaderHeight = 5
+  y += headerHeight
 
-  const col1Width = 42
-  const col2Width = 28
-  const col3Width = 8
-  const col4Width = isTrimestriel ? 12 : 14
-  const col5Width = isTrimestriel ? 12 : 0
-  const col6Width = isTrimestriel ? 12 : 0
-  const col7Width = 12
-  const col8Width = 10
-  const col9Width =
-    contentWidth - col1Width - col2Width - col3Width - col4Width - col5Width - col6Width - col7Width - col8Width
+  // Group subjects
+  const groupedSubjects: { [key: string]: any[] } = {}
+  ;(subjects || []).forEach((subject: any) => {
+    const groupName = subject.group || (isAnglophone ? "Other" : "Autres")
+    if (!groupedSubjects[groupName]) {
+      groupedSubjects[groupName] = []
+    }
+    groupedSubjects[groupName].push(subject)
+  })
 
-  // Table header
-  pdf.setFillColor(30, 64, 175)
-  pdf.rect(margin, y, contentWidth, tableHeaderHeight, "F")
-
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-
-  let colX = margin
-  pdf.text("MATIERES", colX + 2, y + 4)
-  colX += col1Width
-
-  pdf.text("ENSEIGNANT", colX + 2, y + 4)
-  colX += col2Width
-
-  pdf.text("Coef", colX + col3Width / 2, y + 4, { align: "center" })
-  colX += col3Width
-
-  if (isTrimestriel) {
-    pdf.text("Séq 1", colX + col4Width / 2, y + 4, { align: "center" })
-    colX += col4Width
-    pdf.text("Séq 2", colX + col5Width / 2, y + 4, { align: "center" })
-    colX += col5Width
-    pdf.text("Moy", colX + col6Width / 2, y + 4, { align: "center" })
-    colX += col6Width
-  } else {
-    pdf.text("Note /20", colX + col4Width / 2, y + 4, { align: "center" })
-    colX += col4Width
+  const getScoreColor = (score: number) => {
+    if (score < 10) return [220, 38, 38] // Red
+    if (score < 12) return [234, 179, 8] // Yellow
+    if (score < 15) return [59, 130, 246] // Blue
+    return [34, 197, 94] // Green
   }
 
-  pdf.text("N x C", colX + col7Width / 2, y + 4, { align: "center" })
-  colX += col7Width
-
-  pdf.text("Rang", colX + col8Width / 2, y + 4, { align: "center" })
-  colX += col8Width
-
-  pdf.text("Appréciation", colX + 2, y + 4)
-
-  y += tableHeaderHeight
+  const getAppreciationText = (score: number, isEng: boolean) => {
+    if (score >= 18) return isEng ? "Excellent" : "Excellent"
+    if (score >= 16) return isEng ? "Very Good" : "Très Bien"
+    if (score >= 14) return isEng ? "Good" : "Bien"
+    if (score >= 12) return isEng ? "Fairly Good" : "Assez Bien"
+    if (score >= 10) return isEng ? "Average" : "Passable"
+    if (score >= 8) return isEng ? "Below Average" : "Insuffisant"
+    return isEng ? "Poor" : "Faible"
+  }
 
   let totalCoef = 0
   let totalPoints = 0
 
-  groups.forEach((groupName) => {
-    const groupSubjects = subjectsByGroup[groupName] || []
-
-    pdf.setFillColor(219, 234, 254)
-    pdf.rect(margin, y, contentWidth, groupHeaderHeight, "F")
+  Object.entries(groupedSubjects).forEach(([groupName, groupSubjects]) => {
+    // Group header
+    pdf.setFillColor(230, 230, 250)
+    pdf.rect(margin, y, contentWidth, rowHeight, "F")
     pdf.setTextColor(30, 64, 175)
-    pdf.setFontSize(5)
+    pdf.setFontSize(6)
     pdf.setFont("helvetica", "bold")
-    pdf.text((groupName || "").toUpperCase(), margin + 2, y + 3.5)
-    y += groupHeaderHeight
+    pdf.text(groupName, margin + 2, y + 3.5)
+    y += rowHeight
+
+    let groupCoef = 0
+    let groupPoints = 0
 
     groupSubjects.forEach((subject, idx) => {
-      if (!subject) return
-
-      const score1 = numOrZero(subject?.score1)
-      const score2 = numOrZero(subject?.score2)
-      const averageScore = numOrZero(subject?.average)
-      const coef = numOrZero(subject?.coefficient) || 1
-      const weighted = averageScore !== undefined && !isNaN(averageScore) ? averageScore * coef : undefined
-      const subjectRank = subject?.rank
-
-      if (averageScore !== undefined && !isNaN(averageScore)) {
-        totalCoef += coef
-        totalPoints += weighted || 0
-      }
-
-      const bgColor = idx % 2 === 0 ? [255, 255, 255] : [248, 250, 252]
+      const bgColor = idx % 2 === 0 ? [255, 255, 255] : [248, 248, 248]
       pdf.setFillColor(bgColor[0], bgColor[1], bgColor[2])
       pdf.rect(margin, y, contentWidth, rowHeight, "F")
 
-      pdf.setDrawColor(226, 232, 240)
-      pdf.setLineWidth(0.1)
-      pdf.line(margin, y + rowHeight, margin + contentWidth, y + rowHeight)
-
-      colX = margin
-      pdf.setTextColor(30, 41, 59)
+      pdf.setTextColor(0, 0, 0)
       pdf.setFontSize(5)
       pdf.setFont("helvetica", "normal")
-      pdf.text((subject?.name || "-").substring(0, 22), colX + 1, y + 3.5)
-      colX += col1Width
 
-      pdf.setTextColor(100, 116, 139)
-      pdf.setFontSize(4)
-      pdf.text((subject?.teacher || "-").substring(0, 18), colX + 1, y + 3.5)
-      colX += col2Width
+      const coef = numOrZero(subject.coefficient)
+      const avg = numOrZero(subject.average)
+      const scoreColor = getScoreColor(avg)
 
-      pdf.setTextColor(30, 41, 59)
-      pdf.setFontSize(5)
-      pdf.setFont("helvetica", "bold")
-      pdf.text(String(coef), colX + col3Width / 2, y + 3.5, { align: "center" })
-      colX += col3Width
+      xPos = margin
 
-      if (isTrimestriel) {
-        const score1Color = getGradeColor(score1)
-        pdf.setTextColor(score1Color[0], score1Color[1], score1Color[2])
-        pdf.setFontSize(5)
-        pdf.text(safeNum(score1), colX + col4Width / 2, y + 3.5, { align: "center" })
-        colX += col4Width
-
-        const score2Color = getGradeColor(score2)
-        pdf.setTextColor(score2Color[0], score2Color[1], score2Color[2])
-        pdf.text(safeNum(score2), colX + col5Width / 2, y + 3.5, { align: "center" })
-        colX += col5Width
-
-        const averageColor = getGradeColor(averageScore)
-        pdf.setTextColor(averageColor[0], averageColor[1], averageColor[2])
+      if (isTrimester) {
+        // Subject name
+        pdf.text((subject.name || "").substring(0, 25), xPos + 1, y + 3.5)
+        xPos += 45
+        // Teacher
+        pdf.text((subject.teacher || "-").substring(0, 18), xPos + 1, y + 3.5)
+        xPos += 30
+        // Coef
+        pdf.text(coef.toString(), xPos + 5, y + 3.5, { align: "center" })
+        xPos += 10
+        // Seq 1
+        const seq1 = numOrZero(subject.score1)
+        pdf.setTextColor(getScoreColor(seq1)[0], getScoreColor(seq1)[1], getScoreColor(seq1)[2])
+        pdf.text(seq1 > 0 ? seq1.toFixed(2) : "-", xPos + 6, y + 3.5, { align: "center" })
+        xPos += 12
+        // Seq 2
+        const seq2 = numOrZero(subject.score2)
+        pdf.setTextColor(getScoreColor(seq2)[0], getScoreColor(seq2)[1], getScoreColor(seq2)[2])
+        pdf.text(seq2 > 0 ? seq2.toFixed(2) : "-", xPos + 6, y + 3.5, { align: "center" })
+        xPos += 12
+        // Average
+        pdf.setTextColor(scoreColor[0], scoreColor[1], scoreColor[2])
         pdf.setFont("helvetica", "bold")
-        pdf.text(safeNum(averageScore), colX + col6Width / 2, y + 3.5, { align: "center" })
-        colX += col6Width
+        pdf.text(avg.toFixed(2), xPos + 6, y + 3.5, { align: "center" })
+        xPos += 12
+        // /20
+        pdf.setTextColor(0, 0, 0)
+        pdf.setFont("helvetica", "normal")
+        pdf.text((coef * avg).toFixed(2), xPos + 6, y + 3.5, { align: "center" })
+        xPos += 12
+        // Rank
+        const rankText = subject.rank ? `${subject.rank}/${subject.classSize || classSize}` : "-"
+        pdf.text(rankText, xPos + 7.5, y + 3.5, { align: "center" })
+        xPos += 15
+        // Appreciation
+        pdf.text(getAppreciationText(avg, isAnglophone), xPos + 1, y + 3.5)
       } else {
-        const averageColor = getGradeColor(averageScore)
-        pdf.setTextColor(averageColor[0], averageColor[1], averageColor[2])
+        // Subject name
+        pdf.text((subject.name || "").substring(0, 28), xPos + 1, y + 3.5)
+        xPos += 50
+        // Teacher
+        pdf.text((subject.teacher || "-").substring(0, 20), xPos + 1, y + 3.5)
+        xPos += 35
+        // Coef
+        pdf.text(coef.toString(), xPos + 6, y + 3.5, { align: "center" })
+        xPos += 12
+        // Score
+        pdf.setTextColor(scoreColor[0], scoreColor[1], scoreColor[2])
         pdf.setFont("helvetica", "bold")
-        pdf.text(safeNum(averageScore), colX + col4Width / 2, y + 3.5, { align: "center" })
-        colX += col4Width
+        pdf.text(avg.toFixed(2), xPos + 7.5, y + 3.5, { align: "center" })
+        xPos += 15
+        // /20
+        pdf.setTextColor(0, 0, 0)
+        pdf.setFont("helvetica", "normal")
+        pdf.text((coef * avg).toFixed(2), xPos + 7.5, y + 3.5, { align: "center" })
+        xPos += 15
+        // Rank
+        const rankText = subject.rank ? `${subject.rank}/${subject.classSize || classSize}` : "-"
+        pdf.text(rankText, xPos + 9, y + 3.5, { align: "center" })
+        xPos += 18
+        // Appreciation
+        pdf.text(getAppreciationText(avg, isAnglophone), xPos + 1, y + 3.5)
       }
 
-      pdf.setTextColor(71, 85, 105)
-      pdf.setFont("helvetica", "normal")
-      pdf.setFontSize(5)
-      pdf.text(safeNum(weighted), colX + col7Width / 2, y + 3.5, { align: "center" })
-      colX += col7Width
-
-      if (subjectRank && subjectRank.classSize) {
-        const rankColor = subjectRank <= 3 ? [22, 163, 74] : subjectRank <= 5 ? [37, 99, 235] : [71, 85, 105]
-        pdf.setTextColor(rankColor[0], rankColor[1], rankColor[2])
-        pdf.setFont("helvetica", "bold")
-        pdf.text(`${subjectRank}/${subjectRank.classSize}`, colX + col8Width / 2, y + 3.5, { align: "center" })
-      } else {
-        pdf.setTextColor(148, 163, 184)
-        pdf.text("-", colX + col8Width / 2, y + 3.5, { align: "center" })
-      }
-      colX += col8Width
-
-      pdf.setTextColor(100, 116, 139)
-      pdf.setFontSize(4)
-      pdf.setFont("helvetica", "italic")
-      pdf.text(getAppreciation(averageScore), colX + 1, y + 3.5)
-
+      groupCoef += coef
+      groupPoints += coef * avg
       y += rowHeight
     })
 
-    // Declare groupAverages variable
-    const groupAverages: Record<string, number> = {
-      Autres: 12.5, // Example value
-      Mathématiques: 14.0, // Example value
-      Sciences: 13.0, // Example value
-    }
-
-    const groupAvg = groupAverages?.[groupName]
-    pdf.setFillColor(239, 246, 255)
+    // Group total
+    pdf.setFillColor(220, 220, 240)
     pdf.rect(margin, y, contentWidth, rowHeight, "F")
     pdf.setTextColor(30, 64, 175)
     pdf.setFontSize(5)
     pdf.setFont("helvetica", "bold")
-
-    const avgLabelX = margin + col1Width + col2Width - 20
-    pdf.text(`Moyenne ${groupName}:`, avgLabelX, y + 3.5, { align: "right" })
-
-    const avgValueX = isTrimestriel
-      ? margin + col1Width + col2Width + col3Width + col4Width + col5Width + col6Width / 2
-      : margin + col1Width + col2Width + col3Width + col4Width / 2
-    pdf.text(safeNum(groupAvg), avgValueX, y + 3.5, { align: "center" })
-
+    const groupAvg = groupCoef > 0 ? groupPoints / groupCoef : 0
+    const totalGroupLabel = isAnglophone
+      ? `Group Total: Coef ${groupCoef} | Avg: ${groupAvg.toFixed(2)}`
+      : `Total Groupe: Coef ${groupCoef} | Moy: ${groupAvg.toFixed(2)}`
+    pdf.text(totalGroupLabel, margin + 2, y + 3.5)
     y += rowHeight
+
+    totalCoef += groupCoef
+    totalPoints += groupPoints
   })
 
-  // Total row
+  // Final average
+  const finalAvg = totalCoef > 0 ? totalPoints / totalCoef : 0
+  y += 2
+
   pdf.setFillColor(30, 64, 175)
-  pdf.rect(margin, y, contentWidth, rowHeight + 1, "F")
+  pdf.rect(margin, y, contentWidth, 8, "F")
   pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(6)
+  pdf.setFontSize(8)
   pdf.setFont("helvetica", "bold")
-  pdf.text("TOTAUX", margin + 2, y + 4)
-  pdf.text(String(totalCoef || 0), margin + col1Width + col2Width + col3Width / 2, y + 4, { align: "center" })
 
-  const totalPtsX = isTrimestriel
-    ? margin + col1Width + col2Width + col3Width + col4Width + col5Width + col6Width + col7Width / 2
-    : margin + col1Width + col2Width + col3Width + col4Width + col7Width / 2
-  pdf.text(safeNum(totalPoints), totalPtsX, y + 4, { align: "center" })
+  const avgLabel = isAnglophone ? "GENERAL AVERAGE:" : "MOYENNE GENERALE:"
+  const rankLabel = isAnglophone ? "RANK:" : "RANG:"
+  const classAvgLabel = isAnglophone ? "Class Avg:" : "Moy. Classe:"
 
-  y += rowHeight + 3
+  pdf.text(`${avgLabel} ${numOrZero(average).toFixed(2)}/20`, margin + 5, y + 5.5)
+  pdf.text(`${rankLabel} ${rank}/${numOrZero(classSize)}`, margin + 80, y + 5.5)
+  pdf.text(`${classAvgLabel} ${numOrZero(classAverage).toFixed(2)}`, margin + 130, y + 5.5)
 
-  // ===== ATTENDANCE SECTION =====
-  if (attendance && attendance.total_hours > 0) {
-    const attHeight = 12
-    pdf.setFillColor(254, 243, 199) // Yellow background
-    pdf.setDrawColor(251, 191, 36)
-    pdf.roundedRect(margin, y, contentWidth, attHeight, 1.5, 1.5, "FD")
+  y += 12
 
-    pdf.setTextColor(146, 64, 14)
-    pdf.setFontSize(5)
+  // Attendance section
+  if (attendance) {
+    pdf.setFillColor(255, 250, 230)
+    pdf.rect(margin, y, contentWidth, 8, "F")
+    pdf.setDrawColor(200, 180, 100)
+    pdf.rect(margin, y, contentWidth, 8, "S")
+    pdf.setTextColor(0, 0, 0)
+    pdf.setFontSize(7)
     pdf.setFont("helvetica", "bold")
-    pdf.text("ABSENCES", margin + 2, y + 3)
 
-    pdf.setTextColor(120, 53, 15)
-    pdf.setFontSize(5.5)
-    pdf.setFont("helvetica", "normal")
-    const total = numOrZero(attendance.total_hours)
-    const justified = numOrZero(attendance.justified_hours)
-    const unjustified = numOrZero(attendance.unjustified_hours)
+    const absLabel = isAnglophone ? "ABSENCES:" : "ABSENCES:"
+    const totalAbsLabel = isAnglophone ? "Total:" : "Total:"
+    const justifiedLabel = isAnglophone ? "Justified:" : "Justifiées:"
+    const unjustifiedLabel = isAnglophone ? "Unjustified:" : "Non Justifiées:"
 
-    pdf.text(`Total: ${total}h`, margin + 2, y + 7)
-    pdf.text(`Justifiées: ${justified}h`, margin + contentWidth / 3, y + 7)
-    pdf.setTextColor(185, 28, 28) // Red for unjustified
-    pdf.text(`Non Justifiées: ${unjustified}h`, margin + (contentWidth * 2) / 3, y + 7)
+    const totalAbs = numOrZero(attendance.total_hours)
+    const justifiedAbs = numOrZero(attendance.justified_hours)
+    const unjustifiedAbs = totalAbs - justifiedAbs
 
-    y += attHeight + 3
+    pdf.text(
+      `${absLabel} ${totalAbsLabel} ${totalAbs}h | ${justifiedLabel} ${justifiedAbs}h | ${unjustifiedLabel} ${unjustifiedAbs}h`,
+      margin + 5,
+      y + 5.5,
+    )
+
+    y += 10
   }
 
-  // ===== RESULTS SUMMARY =====
-  const summaryBoxHeight = 18
-  const boxWidth = (contentWidth - 9) / 4
-
-  // Box 1: Moyenne
-  pdf.setFillColor(30, 64, 175)
-  pdf.roundedRect(margin, y, boxWidth, summaryBoxHeight, 1.5, 1.5, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("MOYENNE GÉNÉRALE", margin + boxWidth / 2, y + 4, { align: "center" })
-  pdf.setFontSize(12)
-  pdf.text(safeNum(safeAverage), margin + boxWidth / 2, y + 12, { align: "center" })
-  pdf.setFontSize(6)
-  pdf.text("/20", margin + boxWidth / 2, y + 16, { align: "center" })
-
-  // Box 2: Rang
-  const rankBoxColor = typeof rank === "string" ? [107, 114, 128] : [139, 92, 246]
-  pdf.setFillColor(rankBoxColor[0], rankBoxColor[1], rankBoxColor[2])
-  pdf.roundedRect(margin + boxWidth + 3, y, boxWidth, summaryBoxHeight, 1.5, 1.5, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("RANG", margin + boxWidth + 3 + boxWidth / 2, y + 4, { align: "center" })
-  pdf.setFontSize(12)
-  const rankText = typeof rank === "string" ? rank : safeRank === 1 ? "1er" : `${safeRank}ème`
-  pdf.text(rankText, margin + boxWidth + 3 + boxWidth / 2, y + 12, { align: "center" })
-  pdf.setFontSize(6)
-  pdf.text(
-    typeof rank === "string" ? "Non Classé" : `sur ${safeClassSize}`,
-    margin + boxWidth + 3 + boxWidth / 2,
-    y + 16,
-    {
-      align: "center",
-    },
-  )
-
-  // Box 3: Moyenne classe
-  pdf.setFillColor(6, 182, 212)
-  pdf.roundedRect(margin + (boxWidth + 3) * 2, y, boxWidth, summaryBoxHeight, 1.5, 1.5, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("MOY. CLASSE", margin + (boxWidth + 3) * 2 + boxWidth / 2, y + 4, { align: "center" })
-  pdf.setFontSize(12)
-  pdf.text(safeNum(safeClassAverage), margin + (boxWidth + 3) * 2 + boxWidth / 2, y + 12, { align: "center" })
-  pdf.setFontSize(6)
-  pdf.text("/20", margin + (boxWidth + 3) * 2 + boxWidth / 2, y + 16, { align: "center" })
-
-  // Box 4: Mention
-  const mentionColor =
-    safeAverage >= 16
-      ? [245, 158, 11]
-      : safeAverage >= 14
-        ? [22, 163, 74]
-        : safeAverage >= 12
-          ? [37, 99, 235]
-          : safeAverage >= 10
-            ? [107, 114, 128]
-            : [220, 38, 38]
-  pdf.setFillColor(mentionColor[0], mentionColor[1], mentionColor[2])
-  pdf.roundedRect(margin + (boxWidth + 3) * 3, y, boxWidth, summaryBoxHeight, 1.5, 1.5, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("MENTION", margin + (boxWidth + 3) * 3 + boxWidth / 2, y + 4, { align: "center" })
+  // Appreciation and distinction
+  pdf.setFillColor(240, 255, 240)
+  pdf.rect(margin, y, contentWidth, 12, "F")
+  pdf.setTextColor(0, 0, 0)
   pdf.setFontSize(7)
-  const distinctionText = distinction
-  const distinctionLines = pdf.splitTextToSize(distinctionText, boxWidth - 4)
-  pdf.text(distinctionLines, margin + (boxWidth + 3) * 3 + boxWidth / 2, y + 11, { align: "center" })
 
-  y += summaryBoxHeight + 3
+  const appreciationLabel = isAnglophone ? "APPRECIATION:" : "APPRECIATION:"
+  const distinctionLabel = isAnglophone ? "DISTINCTION:" : "DISTINCTION:"
 
-  // ===== OBSERVATIONS =====
-  const obsHeight = 18
-  pdf.setFillColor(248, 250, 252)
-  pdf.setDrawColor(203, 213, 225)
-  pdf.roundedRect(margin, y, contentWidth / 2 - 2, obsHeight, 1.5, 1.5, "FD")
-  pdf.setTextColor(30, 64, 175)
-  pdf.setFontSize(5)
   pdf.setFont("helvetica", "bold")
-  pdf.text("OBSERVATION DU CONSEIL DE CLASSE", margin + 2, y + 4)
-  pdf.setTextColor(71, 85, 105)
-  pdf.setFontSize(4.5)
-  pdf.setFont("helvetica", "italic")
-
-  const obs = generateIntelligentObservation(safeAverage, subjects || [], attendance)
-  pdf.text(obs, margin + 2, y + 8, { maxWidth: contentWidth / 2 - 6 })
-
-  pdf.setFillColor(248, 250, 252)
-  pdf.setDrawColor(203, 213, 225)
-  pdf.roundedRect(margin + contentWidth / 2 + 2, y, contentWidth / 2 - 2, obsHeight, 1.5, 1.5, "FD")
-  pdf.setTextColor(30, 64, 175)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "bold")
-  pdf.text("DÉCISION DU CONSEIL", margin + contentWidth / 2 + 4, y + 4)
-  pdf.setTextColor(71, 85, 105)
-  pdf.setFontSize(6)
+  pdf.text(appreciationLabel, margin + 3, y + 4)
   pdf.setFont("helvetica", "normal")
-  pdf.text(distinctionText, margin + contentWidth / 2 + 4, y + 10)
+  pdf.text(appreciation || "-", margin + 35, y + 4)
 
-  y += obsHeight + 3
+  pdf.setFont("helvetica", "bold")
+  pdf.text(distinctionLabel, margin + 3, y + 9)
+  pdf.setFont("helvetica", "normal")
+  pdf.text(distinction || "-", margin + 35, y + 9)
 
-  // ===== SIGNATURES =====
-  const sigHeight = 16
-  const sigWidth = contentWidth / 3 - 3
+  y += 15
 
-  pdf.setDrawColor(203, 213, 225)
+  // Signatures
+  pdf.setDrawColor(0, 0, 0)
   pdf.setLineWidth(0.2)
 
-  pdf.setTextColor(100, 116, 139)
-  pdf.setFontSize(5)
-  pdf.setFont("helvetica", "normal")
-  pdf.text("Le Directeur", margin + sigWidth / 2, y + 3, { align: "center" })
-  pdf.line(margin + 4, y + sigHeight - 3, margin + sigWidth - 4, y + sigHeight - 3)
-  pdf.setFontSize(4)
-  pdf.text("Signature & Cachet", margin + sigWidth / 2, y + sigHeight, { align: "center" })
+  const sigWidth = (contentWidth - 10) / 3
+  const parentLabel = isAnglophone ? "Parent Signature" : "Signature Parent"
+  const principalLabel = isAnglophone ? "Principal" : "Le Principal"
+  const teacherLabel = isAnglophone ? "Class Teacher" : "Prof. Principal"
 
-  pdf.setFontSize(5)
-  pdf.text("Le Professeur Principal", margin + sigWidth + 4 + sigWidth / 2, y + 3, { align: "center" })
-  pdf.line(margin + sigWidth + 8, y + sigHeight - 3, margin + sigWidth * 2, y + sigHeight - 3)
-  pdf.setFontSize(4)
-  pdf.text("Signature", margin + sigWidth + 4 + sigWidth / 2, y + sigHeight, { align: "center" })
+  pdf.line(margin, y + 10, margin + sigWidth - 5, y + 10)
+  pdf.line(margin + sigWidth + 2.5, y + 10, margin + sigWidth * 2 - 2.5, y + 10)
+  pdf.line(margin + sigWidth * 2 + 5, y + 10, margin + contentWidth, y + 10)
 
-  pdf.setFontSize(5)
-  pdf.text("Le Parent", margin + (sigWidth + 4) * 2 + sigWidth / 2, y + 3, { align: "center" })
-  pdf.line(margin + (sigWidth + 4) * 2 + 4, y + sigHeight - 3, margin + contentWidth - 4, y + sigHeight - 3)
-  pdf.setFontSize(4)
-  pdf.text("Signature", margin + (sigWidth + 4) * 2 + sigWidth / 2, y + sigHeight, { align: "center" })
+  pdf.setFontSize(6)
+  pdf.text(parentLabel, margin + (sigWidth - 5) / 2, y + 14, { align: "center" })
+  pdf.text(principalLabel, margin + sigWidth + 2.5 + (sigWidth - 5) / 2, y + 14, { align: "center" })
+  pdf.text(teacherLabel, margin + sigWidth * 2 + 5 + (sigWidth - 5) / 2, y + 14, { align: "center" })
 
-  // ===== FOOTER =====
+  // Footer - OceanTechnologie
+  const footerY = pageHeight - 8
+  pdf.setFillColor(30, 64, 175)
+  pdf.rect(0, footerY - 2, pageWidth, 10, "F")
+
+  pdf.setTextColor(255, 255, 255)
+  pdf.setFontSize(5)
+  pdf.setFont("courier", "normal")
+
   const now = new Date()
   const dateStr = now.toLocaleDateString("fr-FR")
   const timeStr = now.toLocaleTimeString("fr-FR")
 
-  const footerStartY = pageHeight - 15
-  pdf.setFillColor(15, 23, 42) // Dark blue background
-  pdf.rect(0, footerStartY, pageWidth, 15, "F")
+  const footerText1 = `Bulletin généré le ${dateStr} à ${timeStr} par HARMONY - Développé par OceanTechnologie`
+  const footerText2 = `Email: oceantechnologie6@gmail.com | Site: oceantechnologie6.netlify.app | Tél: +237 679-122-367 / +237 653-517-605`
+  const footerText3 = `"Where ideas turn into reality"`
 
-  // Main footer text
-  pdf.setTextColor(226, 232, 240)
-  pdf.setFontSize(4.5)
-  pdf.setFont("courier", "normal") // Robotic font
-  pdf.text(`Bulletin généré le ${dateStr} à ${timeStr} par HARMONY`, pageWidth / 2, footerStartY + 3, {
-    align: "center",
-  })
-
-  // Company info
-  pdf.setTextColor(148, 163, 184)
-  pdf.setFontSize(4)
-  pdf.text(
-    "Développé par OceanTechnologie | oceantechnologie6@gmail.com | oceantechnologie6.netlify.app",
-    pageWidth / 2,
-    footerStartY + 7,
-    { align: "center" },
-  )
-
-  pdf.setFontSize(3.5)
-  pdf.text("Tél: +237 679-122-367 / +237 653-517-605", pageWidth / 2, footerStartY + 10, { align: "center" })
-
-  // Slogan
-  pdf.setTextColor(96, 165, 250)
-  pdf.setFontSize(4)
+  pdf.text(footerText1, pageWidth / 2, footerY, { align: "center" })
+  pdf.text(footerText2, pageWidth / 2, footerY + 2.5, { align: "center" })
   pdf.setFont("courier", "italic")
-  pdf.text('"Where ideas turn into reality"', pageWidth / 2, footerStartY + 13, { align: "center" })
+  pdf.text(footerText3, pageWidth / 2, footerY + 5, { align: "center" })
 }
 
 export async function generateBulletinPDF(bulletinData: any) {
@@ -1519,7 +1412,7 @@ export async function generateBulletinPDF(bulletinData: any) {
 }
 
 export async function generateClassBulletinsPDF(
-  bulletinsData: BulletinData[],
+  bulletinsData: any[],
   className: string,
   periodName: string,
 ): Promise<void> {
@@ -1527,24 +1420,32 @@ export async function generateClassBulletinsPDF(
     throw new Error("Aucun bulletin à générer")
   }
 
+  const { jsPDF } = await import("jspdf")
+
   const pdf = new jsPDF({
     orientation: "portrait",
     unit: "mm",
     format: "a4",
   })
 
+  // Pre-load logo once for all bulletins
+  const logoUrl = bulletinsData[0]?.schoolSettings?.logo_url || bulletinsData[0]?.logoUrl
+  const preloadedLogo = logoUrl ? await loadLogo(logoUrl) : null
+
   // Sort by average (merit order) - highest first, NC students at the end
   const sortedBulletins = [...bulletinsData].sort((a, b) => {
-    if (typeof a.rank === "string" && typeof b.rank !== "string") return 1
-    if (typeof a.rank !== "string" && typeof b.rank === "string") return -1
-    const avgA = numOrZero(a?.average)
-    const avgB = numOrZero(b?.average)
+    const rankA = a.rank
+    const rankB = b.rank
+    if (rankA === "NC" && rankB !== "NC") return 1
+    if (rankA !== "NC" && rankB === "NC") return -1
+    const avgA = Number(a?.average) || 0
+    const avgB = Number(b?.average) || 0
     return avgB - avgA
   })
 
   sortedBulletins.forEach((bulletin, index) => {
     if (bulletin) {
-      generateSingleBulletin(pdf, bulletin, bulletin.schoolSettings, index === 0)
+      generateSingleBulletin(pdf, bulletin, bulletin.schoolSettings, index === 0, preloadedLogo)
     }
   })
 
