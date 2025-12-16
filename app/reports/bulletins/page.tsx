@@ -61,6 +61,7 @@ type LocalBulletinData = {
   section?: string
   seq1Average?: number
   seq2Average?: number
+  generalObservation?: string // Added for general observation
 }
 
 function getGradeColor(score: number | undefined): string {
@@ -88,6 +89,138 @@ function getAppreciation(score: number, isEnglish: boolean): string {
   if (score >= 10) return "Passable"
   if (score >= 8) return "Insuffisant"
   return "Très Insuffisant"
+}
+
+function getSubjectAppreciation(score: number, isEnglish: boolean): string {
+  if (isEnglish) {
+    if (score >= 18) return "Excellent work, keep it up!"
+    if (score >= 16) return "Very good performance"
+    if (score >= 14) return "Good effort, continue"
+    if (score >= 12) return "Satisfactory, can improve"
+    if (score >= 10) return "Average, more effort needed"
+    if (score >= 8) return "Needs improvement"
+    if (score >= 5) return "Serious difficulties"
+    return "Critical, urgent remediation needed"
+  }
+  if (score >= 18) return "Excellent travail, continue ainsi!"
+  if (score >= 16) return "Très bonne performance"
+  if (score >= 14) return "Bon travail, continue"
+  if (score >= 12) return "Satisfaisant, peut mieux faire"
+  if (score >= 10) return "Passable, plus d'efforts requis"
+  if (score >= 8) return "Insuffisant, à améliorer"
+  if (score >= 5) return "Difficultés sérieuses"
+  return "Critique, remédiation urgente"
+}
+
+function generateGeneralObservation(
+  subjects: Subject[],
+  grades: Record<string, { score: number; coefficient: number }>,
+  average: number,
+  attendance: any,
+  isEnglish: boolean,
+): string {
+  const strongSubjects: string[] = []
+  const averageSubjects: string[] = []
+  const weakSubjects: string[] = []
+  const criticalSubjects: string[] = []
+
+  subjects.forEach((subject) => {
+    const grade = grades[subject.id]
+    if (grade) {
+      if (grade.score >= 14) strongSubjects.push(subject.name)
+      else if (grade.score >= 10) averageSubjects.push(subject.name)
+      else if (grade.score >= 7) weakSubjects.push(subject.name)
+      else criticalSubjects.push(subject.name)
+    }
+  })
+
+  let observation = ""
+
+  if (isEnglish) {
+    // Congratulations based on average
+    if (average >= 16) {
+      observation = "Excellent results! Congratulations for this outstanding performance. "
+    } else if (average >= 14) {
+      observation = "Very good results. Keep up this excellent work. "
+    } else if (average >= 12) {
+      observation = "Good results overall. Continue your efforts. "
+    } else if (average >= 10) {
+      observation = "Acceptable results but can do better. "
+    } else {
+      observation = "Insufficient results. Urgent improvement needed. "
+    }
+
+    // Strong points
+    if (strongSubjects.length > 0) {
+      observation += `Strong points in: ${strongSubjects.slice(0, 3).join(", ")}${strongSubjects.length > 3 ? "..." : ""}. `
+    }
+
+    // Subjects to improve
+    if (weakSubjects.length > 0) {
+      observation += `Must improve in: ${weakSubjects.join(", ")}. `
+    }
+
+    // Critical subjects
+    if (criticalSubjects.length > 0) {
+      observation += `Critical attention needed in: ${criticalSubjects.join(", ")}. `
+    }
+
+    // Attendance comment
+    if (attendance) {
+      const total = attendance.total_hours || 0
+      const unjustified = total - (attendance.justified_hours || 0)
+      if (total === 0) {
+        observation += "Perfect attendance."
+      } else if (unjustified > 10) {
+        observation += `Excessive absences (${unjustified}h unjustified). This affects academic performance.`
+      } else if (total > 5) {
+        observation += `Absences noted (${total}h). Please be more regular.`
+      }
+    }
+  } else {
+    // Félicitations basées sur la moyenne
+    if (average >= 16) {
+      observation = "Excellents résultats! Félicitations pour cette performance remarquable. "
+    } else if (average >= 14) {
+      observation = "Très bons résultats. Continue ce travail exemplaire. "
+    } else if (average >= 12) {
+      observation = "Bons résultats dans l'ensemble. Poursuis tes efforts. "
+    } else if (average >= 10) {
+      observation = "Résultats acceptables mais peut mieux faire. "
+    } else {
+      observation = "Résultats insuffisants. Amélioration urgente requise. "
+    }
+
+    // Points forts
+    if (strongSubjects.length > 0) {
+      observation += `Points forts en: ${strongSubjects.slice(0, 3).join(", ")}${strongSubjects.length > 3 ? "..." : ""}. `
+    }
+
+    // Matières à améliorer
+    if (weakSubjects.length > 0) {
+      observation += `Doit s'améliorer en: ${weakSubjects.join(", ")}. `
+    }
+
+    // Matières critiques
+    if (criticalSubjects.length > 0) {
+      observation += `Attention critique requise en: ${criticalSubjects.join(", ")}. `
+    }
+
+    // Commentaire sur les absences
+    if (attendance) {
+      const total = attendance.total_hours || 0
+      const unjustified = total - (attendance.justified_hours || 0)
+      if (total === 0) {
+        observation += "Assiduité parfaite."
+      } else if (unjustified > 10) {
+        observation += `Absences excessives (${unjustified}h non justifiées). Cela affecte les performances scolaires.`
+      } else if (total > 5) {
+        observation += `Absences constatées (${total}h). Veuillez être plus régulier.`
+      }
+    }
+  }
+
+  return observation
 }
 
 export default function BulletinsPage() {
@@ -166,7 +299,7 @@ export default function BulletinsPage() {
       const tMap: Record<string, string> = {}
       if (classSubjectsWithTeachers) {
         for (const cs of classSubjectsWithTeachers) {
-          if (cs.teacher && cs.subject_id) {
+          if (cs.subject_id) {
             const t = cs.teacher as any
             tMap[cs.subject_id] = `${t.first_name || ""} ${t.last_name || ""}`.trim()
           }
@@ -529,6 +662,9 @@ export default function BulletinsPage() {
             ? Math.round((rankedAverages.reduce((sum, s) => sum + s.average, 0) / rankedAverages.length) * 100) / 100
             : 0
 
+        // Generate general observation
+        const generalObservation = generateGeneralObservation(subjects, grades, average, attendanceData, !!isEnglish)
+
         return {
           student,
           period,
@@ -546,6 +682,7 @@ export default function BulletinsPage() {
           section: student.class?.section?.name,
           seq1Average,
           seq2Average,
+          generalObservation, // Add the generated observation
         }
       } catch (error) {
         console.error("Error generating bulletin data:", error)
@@ -627,6 +764,7 @@ export default function BulletinsPage() {
       attendance: data.attendance,
       seq1Average: data.seq1Average,
       seq2Average: data.seq2Average,
+      generalObservation: data.generalObservation, // Include general observation in PDF data
       schoolSettings: {
         school_name: schoolSettings?.school_name || "",
         school_slogan: schoolSettings?.school_slogan || "",
@@ -952,11 +1090,18 @@ export default function BulletinsPage() {
                                 return (
                                   <tr key={subject.id} className="border-t">
                                     <td className="p-2 border-r">
-                                      {subject.name}
-                                      {subject.teacher_name && (
-                                        <span className="text-xs text-muted-foreground ml-1">
-                                          ({subject.teacher_name})
-                                        </span>
+                                      <div>
+                                        {subject.name}
+                                        {subject.teacher_name && (
+                                          <span className="text-xs text-muted-foreground ml-1">
+                                            ({subject.teacher_name})
+                                          </span>
+                                        )}
+                                      </div>
+                                      {grade?.score !== undefined && (
+                                        <div className="text-xs italic text-muted-foreground mt-0.5">
+                                          {getSubjectAppreciation(grade.score, !!isEnglish)}
+                                        </div>
                                       )}
                                     </td>
                                     <td className="p-2 border-r text-center">{subject.coefficient}</td>
@@ -1029,6 +1174,21 @@ export default function BulletinsPage() {
                     <p className="text-sm text-muted-foreground">{isEnglish ? "Appreciation" : "Appréciation"}</p>
                     <p className="text-lg font-bold">{getAppreciation(bulletinData.average, !!isEnglish)}</p>
                   </div>
+                </div>
+
+                <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">
+                    {isEnglish ? "General Observation" : "Observation Générale"}
+                  </h4>
+                  <p className="text-sm text-blue-900 dark:text-blue-100 leading-relaxed">
+                    {generateGeneralObservation(
+                      bulletinData.subjects,
+                      bulletinData.grades,
+                      bulletinData.average,
+                      bulletinData.attendance,
+                      !!isEnglish,
+                    )}
+                  </p>
                 </div>
 
                 {/* Attendance (for trimester) */}
