@@ -376,8 +376,8 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
   pdf.setFillColor(30, 64, 175)
   const totalWidth = colWidths.reduce((a, b) => a + b, 0)
   const startX = margin + (contentWidth - totalWidth) / 2
-  const headerHeight = 7
-  pdf.rect(startX, y, totalWidth, headerHeight, "F")
+  const tableHeaderHeight = 7
+  pdf.rect(startX, y, totalWidth, tableHeaderHeight, "F")
   pdf.setTextColor(255, 255, 255)
   pdf.setFontSize(8)
   pdf.setFont("helvetica", "bold")
