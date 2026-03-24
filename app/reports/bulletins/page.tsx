@@ -30,7 +30,7 @@ type Student = {
 }
 
 type ClassType = { id: string; name: string; level_id: string }
-type AcademicPeriod = { id: string; name: string; type: string; academic_year: string; number?: number }
+type AcademicPeriod = { id: string; name: string; type: string; academic_year: string; number: number }
 
 type Subject = {
   id: string
