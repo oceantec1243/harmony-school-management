@@ -21,6 +21,7 @@ import {
   Building2,
   GitBranch,
   Clock,
+  PieChart,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -37,6 +38,7 @@ const navigation = [
   { name: "Gestion des absences", href: "/attendance", icon: Clock },
   { name: "Bordereaux", href: "/reports/bordereaux", icon: FileText },
   { name: "Bulletins", href: "/reports/bulletins", icon: FileText },
+  { name: "Analyse Scolaire", href: "/reports/analysis", icon: PieChart },
   { name: "Statistiques", href: "/statistics", icon: BarChart3 },
   { name: "Paramètres", href: "/settings", icon: Settings },
 ]
