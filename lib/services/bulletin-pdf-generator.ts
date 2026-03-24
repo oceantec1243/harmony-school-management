@@ -37,6 +37,12 @@ export interface BulletinData {
   seq2Average?: number
   seq1Rank?: number
   seq2Rank?: number
+  // Historical data for progress graph
+  history?: {
+    periodName: string
+    average: number
+    classAverage?: number
+  }[]
   attendance?: {
     total_hours: number
     justified_hours: number
@@ -99,54 +105,263 @@ const getDecision = (average: number, isEnglish: boolean): string => {
   return isEnglish ? "Warning" : "Avertissement"
 }
 
-// Generate observation based on grades and attendance
+// Generate observation based on grades and attendance - more detailed and explicit
 const generateObservation = (data: BulletinData, isEnglish: boolean): string => {
   const avg = data.average
   const weakSubjects = data.subjects.filter((s) => s.average !== undefined && s.average < 10).map((s) => s.name)
+  const strongSubjects = data.subjects.filter((s) => s.average !== undefined && s.average >= 16).map((s) => s.name)
   const hasAbsences = data.attendance && data.attendance.total_hours > 0
-  const unjustified = data.attendance ? data.attendance.total_hours - data.attendance.justified_hours : 0
+  const totalAbsences = data.attendance?.total_hours || 0
+  const justifiedAbsences = data.attendance?.justified_hours || 0
+  const unjustifiedAbsences = data.attendance?.unjustified_hours || (totalAbsences - justifiedAbsences)
+  
+  // Calculate evolution if available
+  const hasEvolution = data.seq1Average && data.seq2Average && data.seq1Average > 0
+  const evolution = hasEvolution ? ((data.seq2Average! - data.seq1Average!) / data.seq1Average!) * 100 : 0
+  const isProgressing = evolution > 5
+  const isRegressing = evolution < -5
 
   let obs = ""
 
   if (isEnglish) {
-    if (avg >= 16) obs = "Excellent results! Keep up the outstanding work."
-    else if (avg >= 14) obs = "Very good performance. Continue your efforts."
-    else if (avg >= 12) obs = "Good results. Keep working hard to improve."
-    else if (avg >= 10) obs = "Average results. More effort is needed."
-    else obs = "Insufficient results. Significant improvement required."
+    // Performance assessment
+    if (avg >= 18) obs = "Outstanding performance! An exemplary student."
+    else if (avg >= 16) obs = "Excellent results. Keep up the outstanding work."
+    else if (avg >= 14) obs = "Very good performance. Continue your efforts to reach excellence."
+    else if (avg >= 12) obs = "Good results. Keep working hard to improve further."
+    else if (avg >= 10) obs = "Average results. More effort and consistency needed."
+    else if (avg >= 8) obs = "Below average. Significant improvement required."
+    else obs = "Very weak results. Urgent remedial action needed."
 
-    if (weakSubjects.length > 0 && weakSubjects.length <= 3) {
-      obs += ` Improve in: ${weakSubjects.join(", ")}.`
-    } else if (weakSubjects.length > 3) {
-      obs += ` Must improve in several subjects.`
+    // Evolution comment
+    if (isProgressing) obs += ` Positive evolution (+${evolution.toFixed(1)}%).`
+    else if (isRegressing) obs += ` Concerning regression (${evolution.toFixed(1)}%).`
+
+    // Strong subjects
+    if (strongSubjects.length > 0 && strongSubjects.length <= 2) {
+      obs += ` Excellent in: ${strongSubjects.join(", ")}.`
     }
 
-    if (unjustified > 0) {
-      obs += ` Warning: ${unjustified}h unjustified absences.`
-    } else if (hasAbsences) {
-      obs += ` ${data.attendance?.total_hours}h absences (justified).`
+    // Weak subjects
+    if (weakSubjects.length > 0 && weakSubjects.length <= 3) {
+      obs += ` Must improve: ${weakSubjects.join(", ")}.`
+    } else if (weakSubjects.length > 3) {
+      obs += ` ${weakSubjects.length} subjects below average - needs serious work.`
+    }
+
+    // Attendance - detailed
+    if (unjustifiedAbsences > 10) {
+      obs += ` SERIOUS WARNING: ${unjustifiedAbsences}h unjustified absences - requires immediate attention.`
+    } else if (unjustifiedAbsences > 5) {
+      obs += ` Warning: ${unjustifiedAbsences}h unjustified absences.`
+    } else if (unjustifiedAbsences > 0) {
+      obs += ` Note: ${unjustifiedAbsences}h unjustified absences.`
+    }
+    
+    if (justifiedAbsences > 0 && totalAbsences > 0) {
+      obs += ` Total absences: ${totalAbsences}h (${justifiedAbsences}h justified).`
     }
   } else {
-    if (avg >= 16) obs = "Excellents résultats ! Continuez ainsi."
-    else if (avg >= 14) obs = "Très bon travail. Poursuivez vos efforts."
-    else if (avg >= 12) obs = "Bons résultats. Continuez à travailler."
-    else if (avg >= 10) obs = "Résultats moyens. Plus d'efforts nécessaires."
-    else obs = "Résultats insuffisants. Redoublez d'efforts."
+    // Performance assessment - French
+    if (avg >= 18) obs = "Performance exceptionnelle ! Élève exemplaire."
+    else if (avg >= 16) obs = "Excellents résultats. Continuez ainsi, vous êtes sur la bonne voie."
+    else if (avg >= 14) obs = "Très bon travail. Poursuivez vos efforts pour atteindre l'excellence."
+    else if (avg >= 12) obs = "Bons résultats. Continuez à travailler pour progresser davantage."
+    else if (avg >= 10) obs = "Résultats moyens. Plus d'efforts et de régularité nécessaires."
+    else if (avg >= 8) obs = "Résultats en dessous de la moyenne. Amélioration significative requise."
+    else obs = "Résultats très faibles. Action de rattrapage urgente nécessaire."
 
+    // Evolution comment
+    if (isProgressing) obs += ` Évolution positive (+${evolution.toFixed(1)}%).`
+    else if (isRegressing) obs += ` Régression préoccupante (${evolution.toFixed(1)}%).`
+
+    // Strong subjects
+    if (strongSubjects.length > 0 && strongSubjects.length <= 2) {
+      obs += ` Excellent(e) en: ${strongSubjects.join(", ")}.`
+    }
+
+    // Weak subjects
     if (weakSubjects.length > 0 && weakSubjects.length <= 3) {
       obs += ` À améliorer: ${weakSubjects.join(", ")}.`
     } else if (weakSubjects.length > 3) {
-      obs += ` Plusieurs matières à améliorer.`
+      obs += ` ${weakSubjects.length} matières sous la moyenne - travail sérieux requis.`
     }
 
-    if (unjustified > 0) {
-      obs += ` Attention: ${unjustified}h d'absences non justifiées.`
-    } else if (hasAbsences) {
-      obs += ` Absences: ${data.attendance?.total_hours}h (justifiées).`
+    // Attendance - detailed
+    if (unjustifiedAbsences > 10) {
+      obs += ` AVERTISSEMENT SÉRIEUX: ${unjustifiedAbsences}h d'absences non justifiées - attention requise.`
+    } else if (unjustifiedAbsences > 5) {
+      obs += ` Attention: ${unjustifiedAbsences}h d'absences non justifiées.`
+    } else if (unjustifiedAbsences > 0) {
+      obs += ` Note: ${unjustifiedAbsences}h d'absences non justifiées.`
+    }
+    
+    if (justifiedAbsences > 0 && totalAbsences > 0) {
+      obs += ` Total absences: ${totalAbsences}h (${justifiedAbsences}h justifiées).`
     }
   }
 
   return obs
+}
+
+// Draw progress graph showing student evolution over periods
+const drawProgressGraph = (
+  pdf: jsPDF,
+  data: BulletinData,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  isEnglish: boolean
+) => {
+  const history = data.history || []
+  
+  // Build data points from available data
+  const dataPoints: { label: string; value: number; classAvg?: number }[] = []
+  
+  if (data.periodType === "trimester" && data.periodNumber) {
+    // For trimester, show both sequences and trimester average
+    const trimNum = data.periodNumber
+    const seqNum1 = (trimNum - 1) * 2 + 1
+    const seqNum2 = (trimNum - 1) * 2 + 2
+    
+    if (data.seq1Average) {
+      dataPoints.push({ label: `S${seqNum1}`, value: data.seq1Average, classAvg: data.classAverage })
+    }
+    if (data.seq2Average) {
+      dataPoints.push({ label: `S${seqNum2}`, value: data.seq2Average, classAvg: data.classAverage })
+    }
+    if (data.average) {
+      dataPoints.push({ label: `T${trimNum}`, value: data.average, classAvg: data.classAverage })
+    }
+  }
+  
+  // Add historical data if available
+  for (const h of history) {
+    if (!dataPoints.find(p => p.label === h.periodName)) {
+      dataPoints.push({ label: h.periodName, value: h.average, classAvg: h.classAverage })
+    }
+  }
+  
+  if (dataPoints.length < 2) return // Not enough data for a graph
+  
+  // Graph settings
+  const padding = { top: 8, right: 8, bottom: 12, left: 16 }
+  const graphWidth = width - padding.left - padding.right
+  const graphHeight = height - padding.top - padding.bottom
+  const graphX = x + padding.left
+  const graphY = y + padding.top
+  
+  // Draw background
+  pdf.setFillColor(250, 252, 255)
+  pdf.rect(x, y, width, height, "F")
+  pdf.setDrawColor(200, 210, 230)
+  pdf.setLineWidth(0.3)
+  pdf.rect(x, y, width, height, "S")
+  
+  // Title
+  pdf.setTextColor(30, 64, 175)
+  pdf.setFontSize(6)
+  pdf.setFont("helvetica", "bold")
+  pdf.text(isEnglish ? "Progress Chart" : "Graphique d'Évolution", x + width / 2, y + 5, { align: "center" })
+  
+  // Calculate scale
+  const minVal = 0
+  const maxVal = 20
+  const range = maxVal - minVal
+  
+  // Draw grid lines and labels
+  pdf.setDrawColor(230, 235, 245)
+  pdf.setLineWidth(0.1)
+  pdf.setTextColor(120, 120, 140)
+  pdf.setFontSize(4.5)
+  pdf.setFont("helvetica", "normal")
+  
+  const gridLines = [0, 5, 10, 15, 20]
+  for (const val of gridLines) {
+    const lineY = graphY + graphHeight - (val / range) * graphHeight
+    pdf.line(graphX, lineY, graphX + graphWidth, lineY)
+    pdf.text(String(val), graphX - 2, lineY + 1, { align: "right" })
+  }
+  
+  // Draw 10/20 highlight line (passing grade)
+  pdf.setDrawColor(22, 163, 74)
+  pdf.setLineWidth(0.2)
+  const passLineY = graphY + graphHeight - (10 / range) * graphHeight
+  pdf.line(graphX, passLineY, graphX + graphWidth, passLineY)
+  
+  // Calculate points positions
+  const pointSpacing = graphWidth / (dataPoints.length - 1 || 1)
+  const points: { x: number; y: number; value: number; label: string }[] = dataPoints.map((dp, i) => ({
+    x: graphX + i * pointSpacing,
+    y: graphY + graphHeight - (dp.value / range) * graphHeight,
+    value: dp.value,
+    label: dp.label
+  }))
+  
+  // Draw class average line if available (dashed)
+  const classAvgPoints = dataPoints.filter(dp => dp.classAvg !== undefined)
+  if (classAvgPoints.length >= 2) {
+    pdf.setDrawColor(180, 180, 200)
+    pdf.setLineWidth(0.2)
+    for (let i = 0; i < classAvgPoints.length - 1; i++) {
+      const p1x = graphX + i * pointSpacing
+      const p1y = graphY + graphHeight - ((classAvgPoints[i].classAvg || 0) / range) * graphHeight
+      const p2x = graphX + (i + 1) * pointSpacing
+      const p2y = graphY + graphHeight - ((classAvgPoints[i + 1].classAvg || 0) / range) * graphHeight
+      // Dashed line
+      const segments = 6
+      for (let s = 0; s < segments; s += 2) {
+        const sx1 = p1x + (p2x - p1x) * (s / segments)
+        const sy1 = p1y + (p2y - p1y) * (s / segments)
+        const sx2 = p1x + (p2x - p1x) * ((s + 1) / segments)
+        const sy2 = p1y + (p2y - p1y) * ((s + 1) / segments)
+        pdf.line(sx1, sy1, sx2, sy2)
+      }
+    }
+  }
+  
+  // Draw student evolution line
+  pdf.setDrawColor(30, 64, 175)
+  pdf.setLineWidth(0.5)
+  for (let i = 0; i < points.length - 1; i++) {
+    pdf.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y)
+  }
+  
+  // Draw points and labels
+  for (const point of points) {
+    // Point color based on value
+    const color = point.value >= 10 ? [22, 163, 74] : [220, 38, 38]
+    pdf.setFillColor(color[0], color[1], color[2])
+    pdf.circle(point.x, point.y, 1.2, "F")
+    
+    // Value above point
+    pdf.setTextColor(color[0], color[1], color[2])
+    pdf.setFontSize(5)
+    pdf.setFont("helvetica", "bold")
+    pdf.text(point.value.toFixed(1), point.x, point.y - 2.5, { align: "center" })
+    
+    // Period label below
+    pdf.setTextColor(80, 80, 100)
+    pdf.setFontSize(4.5)
+    pdf.setFont("helvetica", "normal")
+    pdf.text(point.label, point.x, graphY + graphHeight + 5, { align: "center" })
+  }
+  
+  // Legend
+  pdf.setFontSize(4)
+  const legendY = y + height - 3
+  
+  // Student line
+  pdf.setFillColor(30, 64, 175)
+  pdf.rect(x + 4, legendY - 1.5, 4, 1.5, "F")
+  pdf.setTextColor(60, 60, 80)
+  pdf.text(isEnglish ? "Student" : "Élève", x + 10, legendY)
+  
+  // Class average line
+  pdf.setFillColor(180, 180, 200)
+  pdf.rect(x + 24, legendY - 1.5, 4, 1.5, "F")
+  pdf.text(isEnglish ? "Class Avg" : "Moy. Classe", x + 30, legendY)
 }
 
 // Load logo
@@ -685,11 +900,14 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
   y += 13
 
   // === OBSERVATION ===
+  const obs = generateObservation(data, isEnglish)
+  const obsBoxHeight = obs.length > 200 ? 16 : 12
+  
   pdf.setFillColor(252, 252, 252)
-  pdf.rect(margin, y, contentWidth, 11, "F")
+  pdf.rect(margin, y, contentWidth, obsBoxHeight, "F")
   pdf.setDrawColor(200, 200, 200)
   pdf.setLineWidth(0.3)
-  pdf.rect(margin, y, contentWidth, 11, "S")
+  pdf.rect(margin, y, contentWidth, obsBoxHeight, "S")
 
   pdf.setTextColor(30, 64, 175)
   pdf.setFontSize(5.5)
@@ -698,13 +916,32 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
   pdf.setTextColor(40, 40, 40)
   pdf.setFont("helvetica", "normal")
   pdf.setFontSize(5)
-  const obs = generateObservation(data, isEnglish)
-  pdf.text(obs.substring(0, 160), margin + 28, y + 4)
-  if (obs.length > 160) {
-    pdf.text(obs.substring(160, 320), margin + 2, y + 8)
+  
+  // Split observation into lines that fit
+  const maxCharsPerLine = 170
+  const line1 = obs.substring(0, maxCharsPerLine)
+  pdf.text(line1, margin + 28, y + 4)
+  
+  if (obs.length > maxCharsPerLine) {
+    const line2 = obs.substring(maxCharsPerLine, maxCharsPerLine * 2)
+    pdf.text(line2, margin + 2, y + 8)
+  }
+  if (obs.length > maxCharsPerLine * 2) {
+    const line3 = obs.substring(maxCharsPerLine * 2, maxCharsPerLine * 3)
+    pdf.text(line3, margin + 2, y + 12)
   }
 
-  y += 13
+  y += obsBoxHeight + 1
+
+  // === PROGRESS GRAPH (for trimester bulletins with seq data) ===
+  const hasProgressData = isTrimester && (data.seq1Average || data.seq2Average)
+  if (hasProgressData) {
+    const graphWidth = contentWidth * 0.55
+    const graphHeight = 28
+    const graphX = margin + (contentWidth - graphWidth) / 2
+    drawProgressGraph(pdf, data, graphX, y, graphWidth, graphHeight, isEnglish)
+    y += graphHeight + 2
+  }
 
   // === SIGNATURES ===
   const sigWidth = contentWidth / 3
