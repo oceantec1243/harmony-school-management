@@ -224,15 +224,81 @@ export default function BordereauxPage() {
       const subjectIds = subjects.map((s) => s.subject_id)
 
       let grades: any[] = []
+      const isTrimestriel = period.type === "trimester"
+      
       if (studentIds.length > 0 && subjectIds.length > 0) {
-        const { data: gradesData } = await supabase
-          .from("grades")
-          .select("student_id, subject_id, score")
-          .in("student_id", studentIds)
-          .in("subject_id", subjectIds)
-          .eq("academic_period_id", selectedPeriod)
+        if (isTrimestriel && period.number) {
+          // For trimesters, calculate from the two sequences
+          const seq1Num = (period.number - 1) * 2 + 1
+          const seq2Num = (period.number - 1) * 2 + 2
 
-        grades = gradesData || []
+          const { data: seqPeriods } = await supabase
+            .from("academic_periods")
+            .select("id, number")
+            .eq("type", "sequence")
+            .eq("academic_year", period.academic_year)
+            .in("number", [seq1Num, seq2Num])
+
+          const seq1Period = seqPeriods?.find((p) => p.number === seq1Num)
+          const seq2Period = seqPeriods?.find((p) => p.number === seq2Num)
+
+          const periodIds = [seq1Period?.id, seq2Period?.id].filter(Boolean) as string[]
+          
+          if (periodIds.length > 0) {
+            const { data: gradesData } = await supabase
+              .from("grades")
+              .select("student_id, subject_id, score, academic_period_id")
+              .in("student_id", studentIds)
+              .in("subject_id", subjectIds)
+              .in("academic_period_id", periodIds)
+
+            // Group grades by student and subject, calculate average
+            const gradesByStudentSubject: Record<string, { seq1?: number; seq2?: number }> = {}
+            
+            for (const g of gradesData || []) {
+              const key = `${g.student_id}_${g.subject_id}`
+              if (!gradesByStudentSubject[key]) gradesByStudentSubject[key] = {}
+              
+              if (g.academic_period_id === seq1Period?.id) {
+                gradesByStudentSubject[key].seq1 = g.score
+              } else if (g.academic_period_id === seq2Period?.id) {
+                gradesByStudentSubject[key].seq2 = g.score
+              }
+            }
+
+            // Convert to grades array with averaged scores
+            for (const [key, scores] of Object.entries(gradesByStudentSubject)) {
+              const [studentId, subjectId] = key.split("_")
+              let avgScore: number | undefined
+              
+              if (scores.seq1 !== undefined && scores.seq2 !== undefined) {
+                avgScore = (scores.seq1 + scores.seq2) / 2
+              } else if (scores.seq1 !== undefined) {
+                avgScore = scores.seq1
+              } else if (scores.seq2 !== undefined) {
+                avgScore = scores.seq2
+              }
+              
+              if (avgScore !== undefined) {
+                grades.push({
+                  student_id: studentId,
+                  subject_id: subjectId,
+                  score: avgScore
+                })
+              }
+            }
+          }
+        } else {
+          // For sequences, fetch grades directly
+          const { data: gradesData } = await supabase
+            .from("grades")
+            .select("student_id, subject_id, score")
+            .in("student_id", studentIds)
+            .in("subject_id", subjectIds)
+            .eq("academic_period_id", selectedPeriod)
+
+          grades = gradesData || []
+        }
       }
 
       const studentReports: StudentReport[] = (students || []).map((student) => {
@@ -244,7 +310,7 @@ export default function BordereauxPage() {
         subjects.forEach((subject) => {
           const grade = studentGrades.find((g) => g.subject_id === subject.subject_id)
           if (grade) {
-            gradesMap[subject.subject_id] = grade.score
+            gradesMap[subject.subject_id] = Math.round(grade.score * 100) / 100
             totalWeighted += grade.score * subject.coefficient
             totalCoef += subject.coefficient
           }

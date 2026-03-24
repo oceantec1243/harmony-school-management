@@ -25,6 +25,7 @@ export interface BulletinData {
   className: string
   periodName: string
   periodType: "sequence" | "trimester"
+  periodNumber?: number // 1, 2, or 3 for trimesters
   academicYear: string
   section: string
   subjects: BulletinSubject[]
@@ -345,18 +346,23 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
   y += 21
 
   // === GRADES TABLE ===
-  // Optimized columns to fill the page nicely
+  // Optimized columns to fill the page nicely - increased for better readability
   const colWidths = isTrimester 
-    ? [42, 28, 8, 12, 12, 12, 18, 32, 30] 
-    : [52, 34, 10, 16, 20, 34, 28]
+    ? [44, 30, 9, 13, 13, 13, 18, 28, 26] 
+    : [54, 36, 10, 18, 22, 30, 24]
+
+  // Calculate actual sequence numbers for trimester labels
+  const trimNum = data.periodNumber || 1
+  const seqLabel1 = `S${(trimNum - 1) * 2 + 1}`
+  const seqLabel2 = `S${(trimNum - 1) * 2 + 2}`
 
   const headers = isTrimester
     ? [
         isEnglish ? "Subject" : "Matière",
         isEnglish ? "Teacher" : "Enseignant",
         "C",
-        "S1",
-        "S2",
+        seqLabel1,
+        seqLabel2,
         isEnglish ? "Avg" : "Moy",
         isEnglish ? "Rank" : "Rang",
         isEnglish ? "Apprec." : "Appréciation",
@@ -376,15 +382,15 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
   pdf.setFillColor(30, 64, 175)
   const totalWidth = colWidths.reduce((a, b) => a + b, 0)
   const startX = margin + (contentWidth - totalWidth) / 2
-  const tableHeaderHeight = 6
+  const tableHeaderHeight = 7
   pdf.rect(startX, y, totalWidth, tableHeaderHeight, "F")
   pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(7)
+  pdf.setFontSize(7.5)
   pdf.setFont("helvetica", "bold")
 
   let colX = startX
   for (let i = 0; i < headers.length; i++) {
-    pdf.text(headers[i], colX + colWidths[i] / 2, y + 4, { align: "center" })
+    pdf.text(headers[i], colX + colWidths[i] / 2, y + 5, { align: "center" })
     colX += colWidths[i]
   }
   y += tableHeaderHeight
@@ -397,18 +403,18 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
     groups[g].push(subj)
   }
 
-  const rowHeight = 5.5
+  const rowHeight = 6
   let rowIdx = 0
 
   for (const [groupName, subjects] of Object.entries(groups)) {
     // Group header
     pdf.setFillColor(235, 240, 255)
-    pdf.rect(startX, y, totalWidth, 5, "F")
+    pdf.rect(startX, y, totalWidth, 5.5, "F")
     pdf.setTextColor(30, 64, 175)
-    pdf.setFontSize(6.5)
+    pdf.setFontSize(7)
     pdf.setFont("helvetica", "bold")
-    pdf.text(groupName.toUpperCase(), startX + 2, y + 3.5)
-    y += 5
+    pdf.text(groupName.toUpperCase(), startX + 2, y + 4)
+    y += 5.5
 
     // Subjects
     for (const subj of subjects) {
@@ -422,11 +428,11 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
       pdf.line(startX, y + rowHeight, startX + totalWidth, y + rowHeight)
 
       colX = startX
-      pdf.setFontSize(6.5)
+      pdf.setFontSize(7)
       pdf.setFont("helvetica", "normal")
       pdf.setTextColor(0, 0, 0)
 
-      const textY = y + 3.8
+      const textY = y + 4.2
 
       if (isTrimester) {
         // Subject name
@@ -434,9 +440,9 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
         colX += colWidths[0]
 
         // Teacher
-        pdf.setFontSize(5.5)
-        pdf.text((subj.teacher || "-").substring(0, 15), colX + 1, textY)
-        pdf.setFontSize(6.5)
+        pdf.setFontSize(6)
+        pdf.text((subj.teacher || "-").substring(0, 16), colX + 1, textY)
+        pdf.setFontSize(7)
         colX += colWidths[1]
 
         // Coefficient
@@ -471,7 +477,7 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
 
         // Appreciation
         pdf.setTextColor(60, 60, 60)
-        pdf.setFontSize(5.5)
+        pdf.setFontSize(6)
         pdf.text(getAppreciation(subj.average, isEnglish), colX + colWidths[7] / 2, textY, { align: "center" })
         colX += colWidths[7]
 
@@ -479,13 +485,13 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
         pdf.text("", colX + 1, textY)
       } else {
         // Subject name
-        pdf.text((subj.name || "").substring(0, 26), colX + 1, textY)
+        pdf.text((subj.name || "").substring(0, 28), colX + 1, textY)
         colX += colWidths[0]
 
         // Teacher
-        pdf.setFontSize(5.5)
-        pdf.text((subj.teacher || "-").substring(0, 18), colX + 1, textY)
-        pdf.setFontSize(6.5)
+        pdf.setFontSize(6)
+        pdf.text((subj.teacher || "-").substring(0, 19), colX + 1, textY)
+        pdf.setFontSize(7)
         colX += colWidths[1]
 
         // Coefficient
@@ -508,7 +514,7 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
 
         // Appreciation
         pdf.setTextColor(60, 60, 60)
-        pdf.setFontSize(5.5)
+        pdf.setFontSize(6)
         pdf.text(getAppreciation(subj.average, isEnglish), colX + colWidths[5] / 2, textY, { align: "center" })
         colX += colWidths[5]
 
@@ -560,13 +566,16 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
     pdf.setTextColor(30, 64, 175)
     pdf.setFontSize(7)
 
-    // Seq 1
+    // Seq 1 (use actual sequence numbers)
+    const seqNum1 = (trimNum - 1) * 2 + 1
+    const seqNum2 = (trimNum - 1) * 2 + 2
+    
     pdf.setFont("helvetica", "bold")
-    pdf.text(isEnglish ? "Seq 1 Avg:" : "Moy Séq 1:", margin + 2, y + 4)
+    pdf.text(isEnglish ? `Seq ${seqNum1} Avg:` : `Moy Séq ${seqNum1}:`, margin + 2, y + 4)
     const c1 = getGradeColor(data.seq1Average)
     pdf.setTextColor(c1[0], c1[1], c1[2])
     pdf.setFontSize(8)
-    pdf.text(safeNum(data.seq1Average), margin + 25, y + 4)
+    pdf.text(safeNum(data.seq1Average), margin + 28, y + 4)
     pdf.setTextColor(80, 80, 80)
     pdf.setFontSize(6)
     pdf.setFont("helvetica", "normal")
@@ -576,11 +585,11 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
     pdf.setTextColor(30, 64, 175)
     pdf.setFontSize(7)
     pdf.setFont("helvetica", "bold")
-    pdf.text(isEnglish ? "Seq 2 Avg:" : "Moy Séq 2:", margin + boxW + 2, y + 4)
+    pdf.text(isEnglish ? `Seq ${seqNum2} Avg:` : `Moy Séq ${seqNum2}:`, margin + boxW + 2, y + 4)
     const c2 = getGradeColor(data.seq2Average)
     pdf.setTextColor(c2[0], c2[1], c2[2])
     pdf.setFontSize(8)
-    pdf.text(safeNum(data.seq2Average), margin + boxW + 25, y + 4)
+    pdf.text(safeNum(data.seq2Average), margin + boxW + 28, y + 4)
     pdf.setTextColor(80, 80, 80)
     pdf.setFontSize(6)
     pdf.setFont("helvetica", "normal")

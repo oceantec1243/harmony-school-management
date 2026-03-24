@@ -136,8 +136,6 @@ export default function SubjectsPage() {
     }
 
     try {
-      console.log("[v0] Submitting subject form:", subjectForm)
-      
       if (editingSubject) {
         const { error } = await supabase
           .from("subjects")
@@ -149,21 +147,16 @@ export default function SubjectsPage() {
           })
           .eq("id", editingSubject.id)
 
-        if (error) {
-          console.error("[v0] Update error:", error)
-          throw error
-        }
+        if (error) throw error
         toast.success("Matière modifiée avec succès")
       } else {
-        const { data, error } = await supabase.from("subjects").insert({
+        const { error } = await supabase.from("subjects").insert({
           name: subjectForm.name,
           code: subjectForm.code,
           subject_group_id: subjectForm.subject_group_id,
           description: subjectForm.description || null,
-        }).select()
+        })
 
-        console.log("[v0] Insert result:", { data, error })
-        
         if (error) throw error
         toast.success("Matière créée avec succès")
       }
