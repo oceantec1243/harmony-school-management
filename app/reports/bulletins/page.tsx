@@ -337,7 +337,7 @@ export default function BulletinsPage() {
         let attendanceData: any = undefined
         if (period.type === "trimester") {
           const { data: attendance } = await supabase
-            .from("student_attendances")
+            .from("attendances")
             .select("*")
             .eq("student_id", studentId)
             .eq("academic_period_id", selectedPeriod)
