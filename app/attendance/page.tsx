@@ -106,7 +106,7 @@ export default function AttendancePage() {
 
       // Load existing attendance records
       const { data: attendanceData } = await supabase
-        .from("attendances")
+        .from("student_attendances")
         .select("*")
         .eq("academic_period_id", selectedPeriod)
         .in("student_id", studentsData?.map((s) => s.id) || [])
@@ -152,7 +152,7 @@ export default function AttendancePage() {
         justified_hours: att.justified_hours,
       }))
 
-      const { error } = await supabase.from("attendances").upsert(records, {
+      const { error } = await supabase.from("student_attendances").upsert(records, {
         onConflict: "student_id,academic_period_id",
       })
 
