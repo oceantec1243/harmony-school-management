@@ -136,6 +136,8 @@ export default function SubjectsPage() {
     }
 
     try {
+      console.log("[v0] Submitting subject form:", subjectForm)
+      
       if (editingSubject) {
         const { error } = await supabase
           .from("subjects")
@@ -147,16 +149,21 @@ export default function SubjectsPage() {
           })
           .eq("id", editingSubject.id)
 
-        if (error) throw error
+        if (error) {
+          console.error("[v0] Update error:", error)
+          throw error
+        }
         toast.success("Matière modifiée avec succès")
       } else {
-        const { error } = await supabase.from("subjects").insert({
+        const { data, error } = await supabase.from("subjects").insert({
           name: subjectForm.name,
           code: subjectForm.code,
           subject_group_id: subjectForm.subject_group_id,
           description: subjectForm.description || null,
-        })
+        }).select()
 
+        console.log("[v0] Insert result:", { data, error })
+        
         if (error) throw error
         toast.success("Matière créée avec succès")
       }
@@ -364,7 +371,7 @@ export default function SubjectsPage() {
             }}
           >
             <DialogTrigger asChild>
-              <Button disabled={filteredGroups.length === 0}>
+              <Button disabled={subjectGroups.length === 0}>
                 <Plus className="h-4 w-4 mr-2" />
                 Nouvelle Matière
               </Button>
@@ -405,9 +412,9 @@ export default function SubjectsPage() {
                       <SelectValue placeholder="Sélectionner un groupe" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredGroups.map((group) => (
+                      {subjectGroups.map((group) => (
                         <SelectItem key={group.id} value={group.id}>
-                          {group.name}
+                          {group.name} {group.section?.name ? `(${group.section.name})` : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>

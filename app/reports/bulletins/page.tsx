@@ -354,7 +354,7 @@ export default function BulletinsPage() {
 
         // Check if student is NC
         const { data: unrankedData } = await supabase
-          .from("student_nc_periods")
+          .from("student_unranked_periods")
           .select("id")
           .eq("student_id", studentId)
           .eq("academic_period_id", selectedPeriod)
@@ -446,6 +446,13 @@ export default function BulletinsPage() {
           const seq1Num = (period.number - 1) * 2 + 1
           const seq2Num = (period.number - 1) * 2 + 2
 
+          console.log("[v0] Trimester calculation:", {
+            trimesterNumber: period.number,
+            seq1Num,
+            seq2Num,
+            academicYear: period.academic_year
+          })
+
           const { data: seqPeriods } = await supabase
             .from("academic_periods")
             .select("id, number")
@@ -456,16 +463,28 @@ export default function BulletinsPage() {
           const seq1Period = seqPeriods?.find((p) => p.number === seq1Num)
           const seq2Period = seqPeriods?.find((p) => p.number === seq2Num)
 
+          console.log("[v0] Sequence periods found:", {
+            seqPeriods,
+            seq1Period,
+            seq2Period
+          })
+
           sequenceGrades = { seq1: {}, seq2: {} }
 
           // Fetch sequence 1 grades
           if (seq1Period && subjectIds.length > 0) {
-            const { data: seq1Grades } = await supabase
+            const { data: seq1Grades, error: seq1Error } = await supabase
               .from("grades")
               .select("student_id, subject_id, score")
               .eq("student_id", studentId)
               .in("subject_id", subjectIds)
               .eq("academic_period_id", seq1Period.id)
+
+            console.log("[v0] Seq1 grades fetched:", {
+              periodId: seq1Period.id,
+              gradesCount: seq1Grades?.length || 0,
+              error: seq1Error
+            })
 
             for (const g of seq1Grades || []) {
               sequenceGrades.seq1[g.subject_id] = g.score
@@ -474,12 +493,18 @@ export default function BulletinsPage() {
 
           // Fetch sequence 2 grades
           if (seq2Period && subjectIds.length > 0) {
-            const { data: seq2Grades } = await supabase
+            const { data: seq2Grades, error: seq2Error } = await supabase
               .from("grades")
               .select("student_id, subject_id, score")
               .eq("student_id", studentId)
               .in("subject_id", subjectIds)
               .eq("academic_period_id", seq2Period.id)
+
+            console.log("[v0] Seq2 grades fetched:", {
+              periodId: seq2Period.id,
+              gradesCount: seq2Grades?.length || 0,
+              error: seq2Error
+            })
 
             for (const g of seq2Grades || []) {
               sequenceGrades.seq2[g.subject_id] = g.score
