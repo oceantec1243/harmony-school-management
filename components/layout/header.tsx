@@ -90,7 +90,6 @@ export function Header() {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="gap-2 pl-2 pr-3">
                 <Avatar className="h-8 w-8">
-                  <AvatarImage src="/admin-avatar.png" />
                   <AvatarFallback className="bg-primary text-primary-foreground text-sm">AP</AvatarFallback>
                 </Avatar>
                 <span className="hidden md:inline text-sm font-medium">Admin Principal</span>

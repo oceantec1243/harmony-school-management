@@ -30,7 +30,7 @@ type Student = {
 }
 
 type ClassType = { id: string; name: string; level_id: string }
-type AcademicPeriod = { id: string; name: string; type: string; academic_year: string; number?: number }
+type AcademicPeriod = { id: string; name: string; type: string; academic_year: string; number: number }
 
 type Subject = {
   id: string
@@ -337,7 +337,7 @@ export default function BulletinsPage() {
         let attendanceData: any = undefined
         if (period.type === "trimester") {
           const { data: attendance } = await supabase
-            .from("attendances")
+            .from("student_attendances")
             .select("*")
             .eq("student_id", studentId)
             .eq("academic_period_id", selectedPeriod)
@@ -354,7 +354,7 @@ export default function BulletinsPage() {
 
         // Check if student is NC
         const { data: unrankedData } = await supabase
-          .from("student_nc_periods")
+          .from("student_unranked_periods")
           .select("id")
           .eq("student_id", studentId)
           .eq("academic_period_id", selectedPeriod)
@@ -737,6 +737,7 @@ export default function BulletinsPage() {
       className: data.student.class?.name || "",
       periodName: data.period.name || "",
       periodType: data.period.type as "sequence" | "trimester",
+      periodNumber: data.period.number,
       academicYear: data.period.academic_year || schoolSettings?.current_academic_year || "",
       section: data.section || "",
       subjects: data.subjects.map((s) => {

@@ -364,7 +364,7 @@ export default function SubjectsPage() {
             }}
           >
             <DialogTrigger asChild>
-              <Button disabled={filteredGroups.length === 0}>
+              <Button disabled={subjectGroups.length === 0}>
                 <Plus className="h-4 w-4 mr-2" />
                 Nouvelle Matière
               </Button>
@@ -405,9 +405,9 @@ export default function SubjectsPage() {
                       <SelectValue placeholder="Sélectionner un groupe" />
                     </SelectTrigger>
                     <SelectContent>
-                      {filteredGroups.map((group) => (
+                      {subjectGroups.map((group) => (
                         <SelectItem key={group.id} value={group.id}>
-                          {group.name}
+                          {group.name} {group.section?.name ? `(${group.section.name})` : ""}
                         </SelectItem>
                       ))}
                     </SelectContent>
