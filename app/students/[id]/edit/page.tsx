@@ -381,27 +381,28 @@ export default function EditStudentPage() {
                   </Button>
                 </div>
 
-                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                                  {periods.map((period) => {
-                                    const isUnranked = unrankedPeriods.includes(period.id)
-                                    return (
-                                      <div
-                                        key={period.id}
-                                        onClick={() => toggleUnrankedPeriod(period.id)}
-                                        className={`
-                                          flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all
-                                          ${
-                                            isUnranked
-                                              ? "border-orange-400 bg-orange-50"
-                                              : "border-muted hover:border-primary/50 hover:bg-muted/50"
-                                          }
-                                        `}
-                                      >
-                                        <Checkbox
-                                          checked={isUnranked}
-                                          onClick={(e) => e.stopPropagation()}
-                                          className={isUnranked ? "border-orange-500 data-[state=checked]:bg-orange-500" : ""}
-                                        />
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                  {periods.map((period) => {
+                    const isUnranked = unrankedPeriods.includes(period.id)
+                    return (
+                      <div
+                        key={period.id}
+                        onClick={() => toggleUnrankedPeriod(period.id)}
+                        className={`
+                          flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all
+                          ${
+                            isUnranked
+                              ? "border-orange-400 bg-orange-50"
+                              : "border-muted hover:border-primary/50 hover:bg-muted/50"
+                          }
+                        `}
+                      >
+                        <Checkbox
+                          checked={isUnranked}
+                          onCheckedChange={() => {}}
+                          onClick={(e) => e.stopPropagation()}
+                          className={isUnranked ? "border-orange-500 data-[state=checked]:bg-orange-500" : ""}
+                        />
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-medium truncate ${isUnranked ? "text-orange-700" : ""}`}>
                             {period.name}
