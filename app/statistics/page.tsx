@@ -50,10 +50,9 @@ export default function StatisticsPage() {
     Array<{ subject: string; average: number; count: number }>
   >([])
 
-  const supabase = createClient()
-
   useEffect(() => {
     async function fetchStatistics() {
+      const supabase = createClient()
       setLoading(true)
       try {
         // Fetch counts
@@ -184,7 +183,7 @@ export default function StatisticsPage() {
       }
     }
     fetchStatistics()
-  }, [supabase, selectedYear, selectedSection])
+  }, [selectedYear, selectedSection])
 
   if (loading) {
     return (
@@ -323,7 +322,7 @@ export default function StatisticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[300px]">
+            <div style={{ minHeight: 300, height: 300, width: "100%" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={gradeDistribution}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -356,7 +355,7 @@ export default function StatisticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[300px]">
+            <div style={{ minHeight: 300, height: 300, width: "100%" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -395,7 +394,7 @@ export default function StatisticsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="h-[250px]">
+            <div style={{ minHeight: 250, height: 250, width: "100%" }}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
@@ -466,7 +465,7 @@ export default function StatisticsPage() {
           <CardTitle>Performance par Niveau</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-[300px]">
+          <div style={{ minHeight: 300, height: 300, width: "100%" }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={levelPerformance}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />

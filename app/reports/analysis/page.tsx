@@ -929,7 +929,7 @@ export default function AnalysisPage() {
                     <CardDescription>Répartition des élèves par tranche de moyenne</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[300px]">
+                    <div style={{ minHeight: 300, height: 300, width: "100%" }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={gradeDistribution}>
                           <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -964,7 +964,7 @@ export default function AnalysisPage() {
                     <CardDescription>Distribution des élèves par catégorie de mention</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[300px]">
+                    <div style={{ minHeight: 300, height: 300, width: "100%" }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie
@@ -1077,7 +1077,7 @@ export default function AnalysisPage() {
                     <CardDescription>Comparaison des moyennes par groupe</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[320px]">
+                    <div style={{ minHeight: 320, height: 320, width: "100%" }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <RadarChart data={groupPerformance}>
                           <PolarGrid />
@@ -1181,7 +1181,7 @@ export default function AnalysisPage() {
                     <CardDescription>Pourcentage d'élèves sous chaque seuil</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="h-[300px]">
+                    <div style={{ minHeight: 300, height: 300, width: "100%" }}>
                       <ResponsiveContainer width="100%" height="100%">
                         <AreaChart
                           data={(() => {

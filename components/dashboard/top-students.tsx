@@ -24,10 +24,10 @@ type TopStudent = {
 export function TopStudents() {
   const [loading, setLoading] = useState(true)
   const [topStudents, setTopStudents] = useState<TopStudent[]>([])
-  const supabase = createClient()
 
   useEffect(() => {
     async function fetchTopStudents() {
+      const supabase = createClient()
       setLoading(true)
       try {
         // Get most recent period
@@ -107,7 +107,7 @@ export function TopStudents() {
       }
     }
     fetchTopStudents()
-  }, [supabase])
+  }, [])
 
   if (loading) {
     return (
@@ -139,43 +139,53 @@ export function TopStudents() {
         {topStudents.length === 0 ? (
           <p className="text-center text-muted-foreground py-4">Aucune donnée disponible</p>
         ) : (
-          topStudents.map((item) => (
-            <div
-              key={item.student.id}
-              className={cn(
-                "flex items-center gap-3 p-3 rounded-xl transition-colors",
-                "hover:bg-muted/50",
-                item.rank === 1 && "bg-gradient-to-r from-amber-50 to-transparent border border-amber-200",
-                item.rank === 2 && "bg-gradient-to-r from-slate-50 to-transparent",
-                item.rank === 3 && "bg-gradient-to-r from-orange-50 to-transparent",
-              )}
-            >
-              <div className="w-8 h-8 flex items-center justify-center font-bold text-lg">
-                {item.rank === 1 && <span className="text-2xl">🥇</span>}
-                {item.rank === 2 && <span className="text-2xl">🥈</span>}
-                {item.rank === 3 && <span className="text-2xl">🥉</span>}
-                {item.rank > 3 && <span className="text-muted-foreground">{item.rank}</span>}
-              </div>
-              <StudentAvatar firstName={item.student.first_name} lastName={item.student.last_name} size="sm" />
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm truncate">
-                  {item.student.first_name} {item.student.last_name}
-                </p>
-                <p className="text-xs text-muted-foreground">{item.student.class?.name || "N/A"}</p>
-              </div>
-              <Badge
-                variant="secondary"
+          topStudents.map((item) => {
+            // Defensive checks for student data
+            if (!item?.student?.id) return null
+            const firstName = item.student?.first_name ?? ""
+            const lastName = item.student?.last_name ?? ""
+            const className = item.student?.class?.name ?? "N/A"
+            const average = typeof item.average === "number" ? item.average : 0
+            const rank = typeof item.rank === "number" ? item.rank : 0
+
+            return (
+              <div
+                key={item.student.id}
                 className={cn(
-                  "font-mono font-bold",
-                  item.average >= 16 && "bg-emerald-100 text-emerald-700",
-                  item.average >= 14 && item.average < 16 && "bg-blue-100 text-blue-700",
-                  item.average >= 10 && item.average < 14 && "bg-amber-100 text-amber-700",
+                  "flex items-center gap-3 p-3 rounded-xl transition-colors",
+                  "hover:bg-muted/50",
+                  rank === 1 && "bg-gradient-to-r from-amber-50 to-transparent border border-amber-200",
+                  rank === 2 && "bg-gradient-to-r from-slate-50 to-transparent",
+                  rank === 3 && "bg-gradient-to-r from-orange-50 to-transparent",
                 )}
               >
-                {item.average.toFixed(2)}
-              </Badge>
-            </div>
-          ))
+                <div className="w-8 h-8 flex items-center justify-center font-bold text-lg">
+                  {rank === 1 && <span className="text-2xl">🥇</span>}
+                  {rank === 2 && <span className="text-2xl">🥈</span>}
+                  {rank === 3 && <span className="text-2xl">🥉</span>}
+                  {rank > 3 && <span className="text-muted-foreground">{rank}</span>}
+                </div>
+                <StudentAvatar firstName={firstName} lastName={lastName} size="sm" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">
+                    {firstName} {lastName}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{className}</p>
+                </div>
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "font-mono font-bold",
+                    average >= 16 && "bg-emerald-100 text-emerald-700",
+                    average >= 14 && average < 16 && "bg-blue-100 text-blue-700",
+                    average >= 10 && average < 14 && "bg-amber-100 text-amber-700",
+                  )}
+                >
+                  {average.toFixed(2)}
+                </Badge>
+              </div>
+            )
+          })
         )}
       </CardContent>
     </Card>
