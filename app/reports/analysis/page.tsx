@@ -1239,6 +1239,7 @@ export default function AnalysisPage() {
                           <TableHead className="text-center">Moyenne</TableHead>
                           <TableHead className="text-center">Mention</TableHead>
                           <TableHead className="text-center">Statut</TableHead>
+                          <TableHead className="w-20 text-center">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1316,6 +1317,18 @@ export default function AnalysisPage() {
                                   Ajourné
                                 </Badge>
                               )}
+                            </TableCell>
+                            <TableCell className="text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedStudent(student)
+                                  setProfileModalOpen(true)
+                                }}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1709,6 +1722,14 @@ export default function AnalysisPage() {
           </Tabs>
         </>
       )}
+
+      {/* Student Profile Modal */}
+      <StudentProfileModal
+        open={profileModalOpen}
+        onOpenChange={setProfileModalOpen}
+        student={selectedStudent}
+        totalStudents={filteredStudents.length}
+      />
     </AppLayout>
   )
 }
