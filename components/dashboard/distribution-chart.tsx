@@ -16,10 +16,10 @@ type ChartData = {
 export function DistributionChart() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<ChartData[]>([])
-  const supabase = createClient()
 
   useEffect(() => {
     async function fetchData() {
+      const supabase = createClient()
       setLoading(true)
       try {
         const { data: students } = await supabase
@@ -51,7 +51,7 @@ export function DistributionChart() {
       }
     }
     fetchData()
-  }, [supabase])
+  }, [])
 
   if (loading) {
     return (
@@ -85,7 +85,7 @@ export function DistributionChart() {
             Aucune donnée disponible
           </div>
         ) : (
-          <div className="h-[250px]">
+          <div style={{ minHeight: 250, height: 250, width: "100%" }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie

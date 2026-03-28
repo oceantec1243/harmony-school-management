@@ -16,10 +16,10 @@ type ChartData = {
 export function PerformanceChart() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<ChartData[]>([])
-  const supabase = createClient()
 
   useEffect(() => {
     async function fetchData() {
+      const supabase = createClient()
       setLoading(true)
       try {
         // Get periods
@@ -85,7 +85,7 @@ export function PerformanceChart() {
       }
     }
     fetchData()
-  }, [supabase])
+  }, [])
 
   if (loading) {
     return (
@@ -117,7 +117,7 @@ export function PerformanceChart() {
             Aucune donnée disponible
           </div>
         ) : (
-          <div className="h-[300px]">
+          <div style={{ minHeight: 300, height: 300, width: "100%" }}>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
