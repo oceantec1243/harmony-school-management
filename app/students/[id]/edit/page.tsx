@@ -28,7 +28,6 @@ export default function EditStudentPage() {
   const params = useParams()
   const id = params.id as string
   const router = useRouter()
-  const supabase = createClient()
 
   const [sections, setSections] = useState<Section[]>([])
   const [levels, setLevels] = useState<Level[]>([])
@@ -61,14 +60,15 @@ export default function EditStudentPage() {
   })
 
   const fetchData = useCallback(async () => {
+    const client = createClient()
     setLoading(true)
     try {
       const [sectionsRes, levelsRes, classesRes, periodsRes, studentRes, unrankedRes] = await Promise.all([
-        supabase.from("sections").select("*").order("name"),
-        supabase.from("levels").select("*").order("order"),
-        supabase.from("classes").select("*").order("name"),
-        supabase.from("academic_periods").select("*").eq("type", "sequence").order("number"),
-        supabase
+        client.from("sections").select("*").order("name"),
+        client.from("levels").select("*").order("order"),
+        client.from("classes").select("*").order("name"),
+        client.from("academic_periods").select("*").eq("type", "sequence").order("number"),
+        client
           .from("students")
           .select(`
             *,
@@ -80,7 +80,7 @@ export default function EditStudentPage() {
           `)
           .eq("id", id)
           .single(),
-        supabase.from("student_unranked_periods").select("academic_period_id").eq("student_id", id),
+        client.from("student_unranked_periods").select("academic_period_id").eq("student_id", id),
       ])
 
       setSections(sectionsRes.data || [])
@@ -124,7 +124,7 @@ export default function EditStudentPage() {
     } finally {
       setLoading(false)
     }
-  }, [supabase, id])
+  }, [id])
 
   useEffect(() => {
     fetchData()
@@ -171,6 +171,7 @@ export default function EditStudentPage() {
     }
 
     setSaving(true)
+    const supabase = createClient()
     try {
       // Update student basic info
       const { error } = await supabase

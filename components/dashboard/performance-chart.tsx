@@ -16,10 +16,10 @@ type ChartData = {
 export function PerformanceChart() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<ChartData[]>([])
-  const supabase = createClient()
 
   useEffect(() => {
     async function fetchData() {
+      const supabase = createClient()
       setLoading(true)
       try {
         // Get periods
@@ -85,7 +85,7 @@ export function PerformanceChart() {
       }
     }
     fetchData()
-  }, [supabase])
+  }, [])
 
   if (loading) {
     return (

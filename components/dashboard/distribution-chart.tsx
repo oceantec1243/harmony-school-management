@@ -16,10 +16,10 @@ type ChartData = {
 export function DistributionChart() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<ChartData[]>([])
-  const supabase = createClient()
 
   useEffect(() => {
     async function fetchData() {
+      const supabase = createClient()
       setLoading(true)
       try {
         const { data: students } = await supabase
@@ -51,7 +51,7 @@ export function DistributionChart() {
       }
     }
     fetchData()
-  }, [supabase])
+  }, [])
 
   if (loading) {
     return (
