@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter, useParams } from "next/navigation"
 import { AppLayout } from "@/components/layout/app-layout"
 import { PageHeader } from "@/components/ui/page-header"
@@ -28,6 +28,7 @@ export default function EditStudentPage() {
   const params = useParams()
   const id = params.id as string
   const router = useRouter()
+  const hasFetched = useRef(false)
 
   const [sections, setSections] = useState<Section[]>([])
   const [levels, setLevels] = useState<Level[]>([])
@@ -59,76 +60,79 @@ export default function EditStudentPage() {
     status: "Active" as "Active" | "Suspended" | "Graduated",
   })
 
-  const fetchData = useCallback(async () => {
-    const client = createClient()
-    setLoading(true)
-    try {
-      const [sectionsRes, levelsRes, classesRes, periodsRes, studentRes, unrankedRes] = await Promise.all([
-        client.from("sections").select("*").order("name"),
-        client.from("levels").select("*").order("order"),
-        client.from("classes").select("*").order("name"),
-        client.from("academic_periods").select("*").eq("type", "sequence").order("number"),
-        client
-          .from("students")
-          .select(`
-            *,
-            class:classes(
-              id, name, level_id, section_id,
-              level:levels(id, name),
-              section:sections(id, name)
-            )
-          `)
-          .eq("id", id)
-          .single(),
-        client.from("student_unranked_periods").select("academic_period_id").eq("student_id", id),
-      ])
-
-      setSections(sectionsRes.data || [])
-      setLevels(levelsRes.data || [])
-      setClasses(classesRes.data || [])
-      setPeriods(periodsRes.data || [])
-
-      if (unrankedRes.data) {
-        setUnrankedPeriods(
-          unrankedRes.data
-            .filter((up) => up.academic_period_id != null)
-            .map((up) => up.academic_period_id)
-        )
-      }
-
-      if (studentRes.data) {
-        const student = studentRes.data
-        setFormData({
-          matricule: student.matricule || "",
-          first_name: student.first_name || "",
-          last_name: student.last_name || "",
-          date_of_birth: student.date_of_birth || "",
-          place_of_birth: student.place_of_birth || "",
-          gender: student.gender || "",
-          class_id: student.class_id || "",
-          father_name: student.father_name || "",
-          father_phone: student.father_phone || "",
-          mother_name: student.mother_name || "",
-          mother_phone: student.mother_phone || "",
-          guardian_name: student.guardian_name || "",
-          guardian_phone: student.guardian_phone || "",
-          address: student.address || "",
-          status: student.status || "Active",
-        })
-        setSelectedSection(student.class?.section_id || "")
-        setSelectedLevel(student.class?.level_id || "")
-      }
-    } catch (error) {
-      console.error("[v0] Error fetching data:", error)
-      toast.error("Erreur lors du chargement des données")
-    } finally {
-      setLoading(false)
-    }
-  }, [id])
-
   useEffect(() => {
+    if (hasFetched.current) return
+    hasFetched.current = true
+
+    async function fetchData() {
+      const client = createClient()
+      setLoading(true)
+      try {
+        const [sectionsRes, levelsRes, classesRes, periodsRes, studentRes, unrankedRes] = await Promise.all([
+          client.from("sections").select("*").order("name"),
+          client.from("levels").select("*").order("order"),
+          client.from("classes").select("*").order("name"),
+          client.from("academic_periods").select("*").eq("type", "sequence").order("number"),
+          client
+            .from("students")
+            .select(`
+              *,
+              class:classes(
+                id, name, level_id, section_id,
+                level:levels(id, name),
+                section:sections(id, name)
+              )
+            `)
+            .eq("id", id)
+            .single(),
+          client.from("student_unranked_periods").select("academic_period_id").eq("student_id", id),
+        ])
+
+        setSections(sectionsRes.data || [])
+        setLevels(levelsRes.data || [])
+        setClasses(classesRes.data || [])
+        setPeriods(periodsRes.data || [])
+
+        if (unrankedRes.data) {
+          setUnrankedPeriods(
+            unrankedRes.data
+              .filter((up) => up.academic_period_id != null)
+              .map((up) => up.academic_period_id)
+          )
+        }
+
+        if (studentRes.data) {
+          const student = studentRes.data
+          setFormData({
+            matricule: student.matricule || "",
+            first_name: student.first_name || "",
+            last_name: student.last_name || "",
+            date_of_birth: student.date_of_birth || "",
+            place_of_birth: student.place_of_birth || "",
+            gender: student.gender || "",
+            class_id: student.class_id || "",
+            father_name: student.father_name || "",
+            father_phone: student.father_phone || "",
+            mother_name: student.mother_name || "",
+            mother_phone: student.mother_phone || "",
+            guardian_name: student.guardian_name || "",
+            guardian_phone: student.guardian_phone || "",
+            address: student.address || "",
+            status: student.status || "Active",
+          })
+          setSelectedSection(student.class?.section_id || "")
+          setSelectedLevel(student.class?.level_id || "")
+        }
+      } catch (error) {
+        console.error("[v0] Error fetching data:", error)
+        toast.error("Erreur lors du chargement des données")
+      } finally {
+        setLoading(false)
+      }
+    }
+    
     fetchData()
-  }, [fetchData])
+  }, [id])
 
   const filteredLevels = selectedSection ? levels.filter((l) => l.section_id === selectedSection) : levels
 
