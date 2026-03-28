@@ -89,7 +89,11 @@ export default function EditStudentPage() {
       setPeriods(periodsRes.data || [])
 
       if (unrankedRes.data) {
-        setUnrankedPeriods(unrankedRes.data.map((up) => up.academic_period_id))
+        setUnrankedPeriods(
+          unrankedRes.data
+            .filter((up) => up.academic_period_id != null)
+            .map((up) => up.academic_period_id)
+        )
       }
 
       if (studentRes.data) {
@@ -135,7 +139,13 @@ export default function EditStudentPage() {
   })
 
   const toggleUnrankedPeriod = (periodId: string) => {
-    setUnrankedPeriods((prev) => (prev.includes(periodId) ? prev.filter((id) => id !== periodId) : [...prev, periodId]))
+    if (!periodId) return
+    setUnrankedPeriods((prev) => {
+      if (prev.includes(periodId)) {
+        return prev.filter((id) => id !== periodId)
+      }
+      return [...prev, periodId]
+    })
   }
 
   const toggleAllPeriods = () => {
@@ -192,14 +202,21 @@ export default function EditStudentPage() {
 
       // Then insert new entries if any
       if (unrankedPeriods.length > 0) {
-        const insertData = unrankedPeriods.map((periodId) => ({
-          student_id: id,
-          academic_period_id: periodId,
-        }))
-        const { error: insertError } = await supabase.from("student_unranked_periods").insert(insertData)
-        if (insertError) {
-          console.error("[v0] Error inserting unranked periods:", insertError)
-          // Don't throw - the student was updated successfully
+        // Filter out any invalid period IDs
+        const validPeriodIds = unrankedPeriods.filter((periodId) => 
+          periodId && periods.some((p) => p.id === periodId)
+        )
+        
+        if (validPeriodIds.length > 0) {
+          const insertData = validPeriodIds.map((periodId) => ({
+            student_id: id,
+            academic_period_id: periodId,
+          }))
+          const { error: insertError } = await supabase.from("student_unranked_periods").insert(insertData)
+          if (insertError) {
+            console.error("[v0] Error inserting unranked periods:", insertError)
+            // Don't throw - the student was updated successfully
+          }
         }
       }
 
@@ -363,27 +380,27 @@ export default function EditStudentPage() {
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {periods.map((period) => {
-                    const isUnranked = unrankedPeriods.includes(period.id)
-                    return (
-                      <div
-                        key={period.id}
-                        onClick={() => toggleUnrankedPeriod(period.id)}
-                        className={`
-                          flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all
-                          ${
-                            isUnranked
-                              ? "border-orange-400 bg-orange-50"
-                              : "border-muted hover:border-primary/50 hover:bg-muted/50"
-                          }
-                        `}
-                      >
-                        <Checkbox
-                          checked={isUnranked}
-                          onCheckedChange={() => toggleUnrankedPeriod(period.id)}
-                          className={isUnranked ? "border-orange-500 data-[state=checked]:bg-orange-500" : ""}
-                        />
+                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                                  {periods.map((period) => {
+                                    const isUnranked = unrankedPeriods.includes(period.id)
+                                    return (
+                                      <div
+                                        key={period.id}
+                                        onClick={() => toggleUnrankedPeriod(period.id)}
+                                        className={`
+                                          flex items-center gap-2 p-3 rounded-lg border-2 cursor-pointer transition-all
+                                          ${
+                                            isUnranked
+                                              ? "border-orange-400 bg-orange-50"
+                                              : "border-muted hover:border-primary/50 hover:bg-muted/50"
+                                          }
+                                        `}
+                                      >
+                                        <Checkbox
+                                          checked={isUnranked}
+                                          onClick={(e) => e.stopPropagation()}
+                                          className={isUnranked ? "border-orange-500 data-[state=checked]:bg-orange-500" : ""}
+                                        />
                         <div className="flex-1 min-w-0">
                           <p className={`text-sm font-medium truncate ${isUnranked ? "text-orange-700" : ""}`}>
                             {period.name}
