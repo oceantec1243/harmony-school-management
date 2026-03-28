@@ -24,10 +24,10 @@ type TopStudent = {
 export function TopStudents() {
   const [loading, setLoading] = useState(true)
   const [topStudents, setTopStudents] = useState<TopStudent[]>([])
+  const supabase = createClient()
 
   useEffect(() => {
     async function fetchTopStudents() {
-      const supabase = createClient()
       setLoading(true)
       try {
         // Get most recent period
@@ -107,7 +107,7 @@ export function TopStudents() {
       }
     }
     fetchTopStudents()
-  }, [])
+  }, [supabase])
 
   if (loading) {
     return (

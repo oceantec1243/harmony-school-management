@@ -20,10 +20,10 @@ type Activity = {
 export function RecentActivity() {
   const [loading, setLoading] = useState(true)
   const [activities, setActivities] = useState<Activity[]>([])
+  const supabase = createClient()
 
   useEffect(() => {
     async function fetchActivities() {
-      const supabase = createClient()
       setLoading(true)
       try {
         const allActivities: Activity[] = []
@@ -85,7 +85,7 @@ export function RecentActivity() {
       }
     }
     fetchActivities()
-  }, [])
+  }, [supabase])
 
   if (loading) {
     return (
