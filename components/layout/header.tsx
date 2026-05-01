@@ -1,6 +1,6 @@
 "use client"
 
-import { Bell, Search, User, Moon, Sun } from "lucide-react"
+import { Bell, Search, User, Moon, Sun, LogOut, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -14,18 +14,39 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { useState, useEffect } from "react"
+import { createClient } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
 
 export function Header() {
   const [isDark, setIsDark] = useState(false)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
     const isDarkMode = document.documentElement.classList.contains("dark")
     setIsDark(isDarkMode)
+
+    // Get current user
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        setUserEmail(user.email || null)
+      }
+    })
   }, [])
 
   const toggleDarkMode = () => {
     document.documentElement.classList.toggle("dark")
     setIsDark(!isDark)
+  }
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true)
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push("/auth/login")
+    router.refresh()
   }
 
   return (
@@ -90,21 +111,40 @@ export function Header() {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="gap-2 pl-2 pr-3">
                 <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-primary text-primary-foreground text-sm">AP</AvatarFallback>
+                  <AvatarFallback className="bg-primary text-primary-foreground text-sm">
+                    {userEmail ? userEmail.substring(0, 2).toUpperCase() : "AD"}
+                  </AvatarFallback>
                 </Avatar>
-                <span className="hidden md:inline text-sm font-medium">Admin Principal</span>
+                <span className="hidden md:inline text-sm font-medium truncate max-w-[150px]">
+                  {userEmail || "Administrateur"}
+                </span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel>Mon Compte</DropdownMenuLabel>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-medium">Mon Compte</p>
+                  <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
+                </div>
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem>
                 <User className="w-4 h-4 mr-2" />
                 Profil
               </DropdownMenuItem>
-              <DropdownMenuItem>Paramètres</DropdownMenuItem>
+              <DropdownMenuItem>
+                <Settings className="w-4 h-4 mr-2" />
+                Parametres
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-destructive">Déconnexion</DropdownMenuItem>
+              <DropdownMenuItem 
+                className="text-destructive focus:text-destructive"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                {isLoggingOut ? "Deconnexion..." : "Deconnexion"}
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
