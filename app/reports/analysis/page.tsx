@@ -260,6 +260,7 @@ export default function AnalysisPage() {
 
         // Determine which period IDs to fetch grades for
         let periodIds: string[] = [selectedPeriod]
+        let sequencePeriods: { id: string; number: number }[] = []
         
         if (period.type === "trimester" && period.number) {
           // For trimesters, get the two sequence periods
@@ -275,23 +276,53 @@ export default function AnalysisPage() {
           
           if (seqPeriods && seqPeriods.length > 0) {
             periodIds = seqPeriods.map((p) => p.id)
+            sequencePeriods = seqPeriods
           }
         }
 
-        // Fetch all grades for the period(s)
+        // Fetch all grades for the period(s) with level_subject for correct coefficients
         const { data: gradesData } = await supabase
           .from("grades")
           .select(`
-            id, score, coefficient, student_id, subject_id, academic_period_id,
-            subject:subjects(name, subject_group:subject_groups(name)),
+            id, score, coefficient, student_id, subject_id, academic_period_id, level_subject_id,
+            subject:subjects(id, name, subject_group:subject_groups(name)),
             student:students(
-              id, first_name, last_name, matricule, gender, class_id,
-              class:classes(id, name, level:levels(name), section:sections(name))
-            )
+              id, first_name, last_name, matricule, gender, class_id, is_ranked,
+              class:classes(id, name, level_id, level:levels(id, name), section:sections(id, name))
+            ),
+            level_subject:level_subjects(coefficient)
           `)
           .in("academic_period_id", periodIds)
 
-        const grades = (gradesData || []) as unknown as Grade[]
+        const grades = (gradesData || []) as unknown as (Grade & { 
+          level_subject?: { coefficient: number } 
+          student?: Student & { is_ranked?: boolean; class?: { level_id?: string } }
+        })[]
+
+        // Fetch all level_subjects for coefficient lookup
+        const { data: levelSubjectsData } = await supabase
+          .from("level_subjects")
+          .select("id, level_id, subject_id, coefficient")
+
+        const levelSubjectsMap = new Map<string, number>()
+        ;(levelSubjectsData || []).forEach((ls) => {
+          // Key: level_id + subject_id
+          levelSubjectsMap.set(`${ls.level_id}_${ls.subject_id}`, ls.coefficient)
+        })
+
+        // Fetch unranked periods for students
+        const { data: unrankedPeriodsData } = await supabase
+          .from("student_unranked_periods")
+          .select("student_id, academic_period_id")
+          .in("academic_period_id", periodIds)
+
+        const unrankedMap = new Map<string, Set<string>>()
+        ;(unrankedPeriodsData || []).forEach((up) => {
+          if (!unrankedMap.has(up.student_id)) {
+            unrankedMap.set(up.student_id, new Set())
+          }
+          unrankedMap.get(up.student_id)!.add(up.academic_period_id)
+        })
 
         // Fetch attendance data
         const { data: attendanceData } = await supabase
@@ -303,8 +334,8 @@ export default function AnalysisPage() {
           (attendanceData || []).map((a) => [a.student_id, a.total_hours])
         )
 
-        // Process students
-        const studentGradesMap = new Map<string, Grade[]>()
+        // Process students - group grades by student
+        const studentGradesMap = new Map<string, typeof grades>()
         grades.forEach((g) => {
           if (!g.student) return
           const existing = studentGradesMap.get(g.student_id) || []
@@ -312,7 +343,7 @@ export default function AnalysisPage() {
           studentGradesMap.set(g.student_id, existing)
         })
 
-        // Calculate student analyses
+        // Calculate student analyses using coefficients from level_subjects
         const studentAnalyses: StudentAnalysis[] = []
         const processedStudents = new Set<string>()
 
@@ -321,42 +352,100 @@ export default function AnalysisPage() {
           processedStudents.add(g.student_id)
 
           const studentGrades = studentGradesMap.get(g.student_id) || []
+          const levelId = g.student.class?.level_id
           
-          // Group grades by subject and calculate averages
-          const subjectGrades = new Map<string, { scores: number[]; coef: number }>()
+          // Check if student is ranked for this period
+          const studentUnrankedPeriods = unrankedMap.get(g.student_id)
+          const isUnrankedForPeriod = studentUnrankedPeriods && 
+            periodIds.some(pid => studentUnrankedPeriods.has(pid))
+          
+          // Group grades by subject
+          const subjectGrades = new Map<string, { 
+            scores: { score: number; periodId: string }[]
+            coef: number 
+            subjectId: string
+          }>()
+          
           studentGrades.forEach((grade) => {
             const subjectName = grade.subject?.name || "Inconnu"
-            const existing = subjectGrades.get(subjectName) || { scores: [], coef: grade.coefficient || 1 }
-            existing.scores.push(grade.score)
+            const subjectId = grade.subject_id
+            
+            // Get coefficient from level_subjects (priority) or grade itself
+            let coef = 1
+            if (levelId && subjectId) {
+              const levelSubjectCoef = levelSubjectsMap.get(`${levelId}_${subjectId}`)
+              if (levelSubjectCoef !== undefined) {
+                coef = levelSubjectCoef
+              } else if (grade.level_subject?.coefficient) {
+                coef = grade.level_subject.coefficient
+              } else if (grade.coefficient) {
+                coef = grade.coefficient
+              }
+            } else if (grade.level_subject?.coefficient) {
+              coef = grade.level_subject.coefficient
+            } else if (grade.coefficient) {
+              coef = grade.coefficient
+            }
+            
+            const existing = subjectGrades.get(subjectName) || { 
+              scores: [], 
+              coef, 
+              subjectId 
+            }
+            existing.scores.push({ score: grade.score, periodId: grade.academic_period_id })
             subjectGrades.set(subjectName, existing)
           })
 
-          // Calculate average per subject (for trimesters, average the two sequences)
+          // Calculate average per subject
+          // For trimester: average of both sequences
+          // For sequence: single score
           const gradesRecord: Record<string, number> = {}
           let totalWeighted = 0
           let totalCoef = 0
 
           subjectGrades.forEach((data, subject) => {
-            const avg = data.scores.reduce((a, b) => a + b, 0) / data.scores.length
-            gradesRecord[subject] = Math.round(avg * 100) / 100
-            totalWeighted += avg * data.coef
+            let subjectAverage: number
+            
+            if (period.type === "trimester" && data.scores.length >= 1) {
+              // For trimester: average of available sequence scores
+              const sum = data.scores.reduce((acc, s) => acc + s.score, 0)
+              subjectAverage = sum / data.scores.length
+            } else {
+              // For sequence: just the score
+              subjectAverage = data.scores[0]?.score || 0
+            }
+            
+            gradesRecord[subject] = Math.round(subjectAverage * 100) / 100
+            totalWeighted += subjectAverage * data.coef
             totalCoef += data.coef
           })
 
           const average = totalCoef > 0 ? totalWeighted / totalCoef : 0
 
-          // Group averages
-          const groupAverages: Record<string, { total: number; coef: number }> = {}
-          studentGrades.forEach((grade) => {
-            const groupName = grade.subject?.subject_group?.name || "Autres"
-            if (!groupAverages[groupName]) groupAverages[groupName] = { total: 0, coef: 0 }
-            groupAverages[groupName].total += grade.score * (grade.coefficient || 1)
-            groupAverages[groupName].coef += grade.coefficient || 1
+          // Group averages using correct coefficients
+          const groupAverages: Record<string, { totalWeighted: number; totalCoef: number }> = {}
+          
+          subjectGrades.forEach((data, subject) => {
+            const grade = studentGrades.find(sg => sg.subject?.name === subject)
+            const groupName = grade?.subject?.subject_group?.name || "Autres"
+            
+            if (!groupAverages[groupName]) {
+              groupAverages[groupName] = { totalWeighted: 0, totalCoef: 0 }
+            }
+            
+            // Calculate subject average for this group
+            const sum = data.scores.reduce((acc, s) => acc + s.score, 0)
+            const subjectAvg = sum / data.scores.length
+            
+            groupAverages[groupName].totalWeighted += subjectAvg * data.coef
+            groupAverages[groupName].totalCoef += data.coef
           })
 
           const groupAvgRecord: Record<string, number> = {}
           Object.entries(groupAverages).forEach(([group, data]) => {
-            groupAvgRecord[group] = data.coef > 0 ? Math.round((data.total / data.coef) * 100) / 100 : 0
+            groupAvgRecord[group] = data.totalCoef > 0 
+              ? Math.round((data.totalWeighted / data.totalCoef) * 100) / 100 
+              : 0
           })
 
           // Identify weak and strong subjects
@@ -366,6 +455,9 @@ export default function AnalysisPage() {
           const strongSubjects = Object.entries(gradesRecord)
             .filter(([_, score]) => score >= 14)
             .map(([name]) => name)
+
+          // Only include ranked students in analysis (unless they're all unranked)
+          const isRanked = g.student.is_ranked !== false && !isUnrankedForPeriod
 
           studentAnalyses.push({
             student: g.student,
@@ -381,10 +473,16 @@ export default function AnalysisPage() {
           })
         })
 
-        // Sort and rank students
+        // Sort and rank students (only ranked students get a numeric rank)
         studentAnalyses.sort((a, b) => b.average - a.average)
+        let currentRank = 0
+        let lastAverage = -1
         studentAnalyses.forEach((s, i) => {
-          s.rank = i + 1
+          if (s.average !== lastAverage) {
+            currentRank = i + 1
+            lastAverage = s.average
+          }
+          s.rank = currentRank
         })
 
         setAllStudents(studentAnalyses)
@@ -403,17 +501,25 @@ export default function AnalysisPage() {
           const classData = classes.find((c) => c.id === classId)
           if (!classData) return
 
-          // Rank students within class
+          // Rank students within class (handle ties)
           const sortedStudents = [...students].sort((a, b) => b.average - a.average)
+          let classRank = 0
+          let lastClassAvg = -1
           sortedStudents.forEach((s, i) => {
-            s.rank = i + 1
+            if (s.average !== lastClassAvg) {
+              classRank = i + 1
+              lastClassAvg = s.average
+            }
+            s.rank = classRank
           })
 
           const totalStudents = students.length
           const passing = students.filter((s) => s.average >= 10).length
           const excellent = students.filter((s) => s.average >= 16).length
           const failing = students.filter((s) => s.average < 8).length
-          const classAverage = students.reduce((sum, s) => sum + s.average, 0) / totalStudents
+          const classAverage = totalStudents > 0 
+            ? students.reduce((sum, s) => sum + s.average, 0) / totalStudents 
+            : 0
 
           // Distribution
           const distribution = GRADE_RANGES.map((r) => ({
@@ -425,9 +531,9 @@ export default function AnalysisPage() {
             classData,
             students: sortedStudents,
             average: Math.round(classAverage * 100) / 100,
-            passRate: Math.round((passing / totalStudents) * 100),
-            excellenceRate: Math.round((excellent / totalStudents) * 100),
-            failureRate: Math.round((failing / totalStudents) * 100),
+            passRate: totalStudents > 0 ? Math.round((passing / totalStudents) * 100) : 0,
+            excellenceRate: totalStudents > 0 ? Math.round((excellent / totalStudents) * 100) : 0,
+            failureRate: totalStudents > 0 ? Math.round((failing / totalStudents) * 100) : 0,
             bestStudent: sortedStudents[0],
             worstStudent: sortedStudents[sortedStudents.length - 1],
             distribution,
@@ -460,14 +566,44 @@ export default function AnalysisPage() {
           atRiskCount,
         })
 
-        // Subject performance
-        const subjectMap = new Map<string, { total: number; count: number; passing: number; group: string }>()
+        // Subject performance - calculate using correct coefficients
+        const subjectMap = new Map<string, { 
+          totalWeighted: number
+          totalCoef: number
+          totalScores: number
+          passing: number
+          group: string 
+        }>()
+        
+        // Process each grade for subject performance
         grades.forEach((g) => {
           const name = g.subject?.name || "Inconnu"
           const group = g.subject?.subject_group?.name || "Autres"
-          const existing = subjectMap.get(name) || { total: 0, count: 0, passing: 0, group }
-          existing.total += g.score
-          existing.count++
+          const levelId = g.student?.class?.level_id
+          
+          // Get coefficient
+          let coef = 1
+          if (levelId && g.subject_id) {
+            const levelSubjectCoef = levelSubjectsMap.get(`${levelId}_${g.subject_id}`)
+            if (levelSubjectCoef !== undefined) coef = levelSubjectCoef
+            else if (g.level_subject?.coefficient) coef = g.level_subject.coefficient
+            else if (g.coefficient) coef = g.coefficient
+          } else if (g.level_subject?.coefficient) {
+            coef = g.level_subject.coefficient
+          } else if (g.coefficient) {
+            coef = g.coefficient
+          }
+          
+          const existing = subjectMap.get(name) || { 
+            totalWeighted: 0, 
+            totalCoef: 0, 
+            totalScores: 0, 
+            passing: 0, 
+            group 
+          }
+          existing.totalWeighted += g.score * coef
+          existing.totalCoef += coef
+          existing.totalScores++
           if (g.score >= 10) existing.passing++
           subjectMap.set(name, existing)
         })
@@ -475,9 +611,13 @@ export default function AnalysisPage() {
         const subjectPerfData = Array.from(subjectMap.entries())
           .map(([subject, data]) => ({
             subject,
-            average: Math.round((data.total / data.count) * 100) / 100,
-            passRate: Math.round((data.passing / data.count) * 100),
-            count: data.count,
+            average: data.totalCoef > 0 
+              ? Math.round((data.totalWeighted / data.totalCoef) * 100) / 100 
+              : 0,
+            passRate: data.totalScores > 0 
+              ? Math.round((data.passing / data.totalScores) * 100) 
+              : 0,
+            count: data.totalScores,
             group: data.group,
           }))
           .sort((a, b) => b.average - a.average)
@@ -485,12 +625,28 @@ export default function AnalysisPage() {
         setSubjectPerformance(subjectPerfData)
 
         // Group performance
-        const groupMap = new Map<string, { total: number; count: number; passing: number }>()
+        const groupMap = new Map<string, { totalWeighted: number; totalCoef: number; totalScores: number; passing: number }>()
         grades.forEach((g) => {
           const group = g.subject?.subject_group?.name || "Autres"
-          const existing = groupMap.get(group) || { total: 0, count: 0, passing: 0 }
-          existing.total += g.score
-          existing.count++
+          const levelId = g.student?.class?.level_id
+          
+          // Get coefficient
+          let coef = 1
+          if (levelId && g.subject_id) {
+            const levelSubjectCoef = levelSubjectsMap.get(`${levelId}_${g.subject_id}`)
+            if (levelSubjectCoef !== undefined) coef = levelSubjectCoef
+            else if (g.level_subject?.coefficient) coef = g.level_subject.coefficient
+            else if (g.coefficient) coef = g.coefficient
+          } else if (g.level_subject?.coefficient) {
+            coef = g.level_subject.coefficient
+          } else if (g.coefficient) {
+            coef = g.coefficient
+          }
+          
+          const existing = groupMap.get(group) || { totalWeighted: 0, totalCoef: 0, totalScores: 0, passing: 0 }
+          existing.totalWeighted += g.score * coef
+          existing.totalCoef += coef
+          existing.totalScores++
           if (g.score >= 10) existing.passing++
           groupMap.set(group, existing)
         })
@@ -498,8 +654,12 @@ export default function AnalysisPage() {
         setGroupPerformance(
           Array.from(groupMap.entries()).map(([group, data]) => ({
             group,
-            average: Math.round((data.total / data.count) * 100) / 100,
-            passRate: Math.round((data.passing / data.count) * 100),
+            average: data.totalCoef > 0 
+              ? Math.round((data.totalWeighted / data.totalCoef) * 100) / 100 
+              : 0,
+            passRate: data.totalScores > 0 
+              ? Math.round((data.passing / data.totalScores) * 100) 
+              : 0,
           }))
         )
 
