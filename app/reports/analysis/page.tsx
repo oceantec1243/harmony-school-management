@@ -220,6 +220,9 @@ export default function AnalysisPage() {
 
   const supabase = createClient()
 
+  // Track all active students for effectif calculation
+  const [allActiveStudents, setAllActiveStudents] = useState<{ classId: string; count: number }[]>([])
+
   // Fetch initial data
   useEffect(() => {
     async function fetchInitialData() {
@@ -236,6 +239,20 @@ export default function AnalysisPage() {
       setPeriods(periodsRes.data || [])
       setClasses(classesRes.data || [])
       setSections(sectionsRes.data || [])
+
+      // Fetch count of active students per class
+      const { data: classStudentCounts } = await supabase
+        .from("students")
+        .select("class_id")
+        .ilike("status", "active")
+
+      const countByClass = new Map<string, number>()
+      if (classStudentCounts) {
+        for (const student of classStudentCounts) {
+          countByClass.set(student.class_id, (countByClass.get(student.class_id) || 0) + 1)
+        }
+      }
+      setAllActiveStudents(Array.from(countByClass.entries()).map(([classId, count]) => ({ classId, count })))
 
       // Set default period (latest trimester)
       const trimesters = (periodsRes.data || []).filter((p) => p.type === "trimester")
@@ -1025,7 +1042,16 @@ export default function AnalysisPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Effectif</p>
-                    <p className="text-2xl font-bold text-primary">{filteredStudents.length}</p>
+                    <p className="text-2xl font-bold text-primary">
+                      {selectedClass === "all"
+                        ? selectedSection === "all"
+                          ? allActiveStudents.reduce((sum, c) => sum + c.count, 0)
+                          : allActiveStudents.reduce((sum, c) => {
+                              const classData = classes.find((cl) => cl.id === c.classId)
+                              return classData?.section?.name === selectedSection ? sum + c.count : sum
+                            }, 0)
+                        : allActiveStudents.find((c) => c.classId === selectedClass)?.count || 0}
+                    </p>
                   </div>
                 </div>
               </CardContent>

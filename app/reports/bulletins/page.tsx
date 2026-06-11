@@ -329,11 +329,27 @@ export default function BulletinsPage() {
 
         if (studentError || !student) throw new Error("Élève non trouvé")
 
-        const { data: period } = await supabase.from("academic_periods").select("*").eq("id", selectedPeriod).single()
+        // Handle annual period pseudo-IDs
+        let period = periods.find((p) => p.id === selectedPeriod)
+        let isAnnualPeriod = false
+        let academicYear = ""
+
+        if (!period && selectedPeriod.startsWith("annual_")) {
+          // Create synthetic period for annual view
+          academicYear = selectedPeriod.split("_")[1]
+          isAnnualPeriod = true
+          period = {
+            id: selectedPeriod,
+            name: isEnglish ? "Full Year" : "Année Complète",
+            type: "year",
+            academic_year: academicYear,
+            number: 0,
+          } as any
+        }
 
         if (!period) throw new Error("Période non trouvée")
 
-        // Fetch attendance for trimester
+        // Fetch attendance for trimester (not for annual)
         let attendanceData: any = undefined
         if (period.type === "trimester") {
           const { data: attendance } = await supabase
@@ -353,18 +369,22 @@ export default function BulletinsPage() {
         }
 
         // Check if student is NC
-        const { data: unrankedData } = await supabase
-          .from("student_unranked_periods")
-          .select("id")
-          .eq("student_id", studentId)
-          .eq("academic_period_id", selectedPeriod)
-          .maybeSingle()
+        let isUnranked = student.is_ranked === false
+        if (!isAnnualPeriod) {
+          const { data: unrankedData } = await supabase
+            .from("student_unranked_periods")
+            .select("id")
+            .eq("student_id", studentId)
+            .eq("academic_period_id", selectedPeriod)
+            .maybeSingle()
 
-        const isUnranked = !!unrankedData || student.is_ranked === false
+          isUnranked = !!unrankedData || isUnranked
+        }
 
         const levelId = student.class?.level_id
         const classId = student.class_id
         const isTrimestriel = period.type === "trimester"
+        const isEnglish = student.class?.section?.name?.toLowerCase().includes("anglophone")
 
         // Fetch class subjects with teachers
         const { data: classSubjectsData } = await supabase
@@ -441,7 +461,67 @@ export default function BulletinsPage() {
 
         let allGrades = allClassGrades
 
-        if (isTrimestriel && period.number) {
+        if (isAnnualPeriod) {
+          // For annual period, fetch all 6 sequences and calculate weighted average
+          const { data: allSequences } = await supabase
+            .from("academic_periods")
+            .select("id, number")
+            .eq("type", "sequence")
+            .eq("academic_year", academicYear)
+            .order("number", { ascending: true })
+
+          const sequenceGradesMap = new Map<string, Record<string, number>>()
+
+          // Fetch grades for all sequences
+          if (allSequences && allSequences.length > 0 && subjectIds.length > 0) {
+            for (const seq of allSequences) {
+              const { data: seqGrades } = await supabase
+                .from("grades")
+                .select("student_id, subject_id, score")
+                .eq("student_id", studentId)
+                .in("subject_id", subjectIds)
+                .eq("academic_period_id", seq.id)
+
+              const seqGradeMap: Record<string, number> = {}
+              for (const g of seqGrades || []) {
+                seqGradeMap[g.subject_id] = g.score
+              }
+              sequenceGradesMap.set(seq.id, seqGradeMap)
+            }
+
+            // Calculate average across all sequences
+            subjects.forEach((subject) => {
+              let totalScore = 0
+              let count = 0
+
+              for (const seqGradeMap of sequenceGradesMap.values()) {
+                if (seqGradeMap[subject.id] !== undefined) {
+                  totalScore += seqGradeMap[subject.id]
+                  count++
+                }
+              }
+
+              if (count > 0) {
+                const avgScore = totalScore / count
+                grades[subject.id] = { score: Math.round(avgScore * 100) / 100, coefficient: subject.coefficient }
+              }
+            })
+          }
+
+          // Fetch all grades for ranking (all sequences, all students)
+          if (!allGrades && allSequences && allSequences.length > 0) {
+            const periodIds = allSequences.map((p) => p.id)
+            if (allStudentIds.length > 0 && subjectIds.length > 0) {
+              const { data } = await supabase
+                .from("grades")
+                .select("student_id, subject_id, score, academic_period_id")
+                .in("student_id", allStudentIds)
+                .in("subject_id", subjectIds)
+                .in("academic_period_id", periodIds)
+              allGrades = data || []
+            }
+          }
+        } else if (isTrimestriel && period.number) {
           // Calculate sequence numbers from trimester number
           const seq1Num = (period.number - 1) * 2 + 1
           const seq2Num = (period.number - 1) * 2 + 2
@@ -621,7 +701,8 @@ export default function BulletinsPage() {
           let tw = 0
           let tc = 0
 
-          if (isTrimestriel) {
+          if (isAnnualPeriod || isTrimestriel) {
+            // For annual and trimester: average of all grades per subject
             subjects.forEach((subject) => {
               const subjectGrades = sGrades.filter((g) => g.subject_id === subject.id)
               if (subjectGrades.length > 0) {
@@ -631,6 +712,7 @@ export default function BulletinsPage() {
               }
             })
           } else {
+            // For single sequence: direct grade
             subjects.forEach((subject) => {
               const grade = sGrades.find((g) => g.subject_id === subject.id)
               if (grade) {
@@ -689,7 +771,7 @@ export default function BulletinsPage() {
         return null
       }
     },
-    [supabase, selectedPeriod],
+    [supabase, selectedPeriod, periods],
   )
 
   // Generate bulletin for selected student
@@ -822,7 +904,13 @@ export default function BulletinsPage() {
 
       // Generate PDF
       const className = classes.find((c) => c.id === selectedClass)?.name || "Classe"
-      const periodName = periods.find((p) => p.id === selectedPeriod)?.name || "Période"
+      let periodName = periods.find((p) => p.id === selectedPeriod)?.name || "Période"
+      
+      // Handle annual period pseudo-IDs
+      if (selectedPeriod.startsWith("annual_")) {
+        const year = selectedPeriod.split("_")[1]
+        periodName = `Année Complète ${year}`
+      }
 
       await generateMassBulletinsPDF(allBulletinsData, `${className} - ${periodName}`)
       toast.success(`${allBulletinsData.length} bulletins générés avec succès`)
@@ -880,6 +968,13 @@ export default function BulletinsPage() {
                     <SelectValue placeholder={isEnglish ? "Select a period" : "Sélectionner une période"} />
                   </SelectTrigger>
                   <SelectContent>
+                    {/* Add "Full Year" option for each academic year */}
+                    {Array.from(new Set(periods.map((p) => p.academic_year))).map((year) => (
+                      <SelectItem key={`annual_${year}`} value={`annual_${year}`}>
+                        {isEnglish ? "Full Year" : "Année Complète"} ({year})
+                      </SelectItem>
+                    ))}
+                    
                     {periods.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.name} (
