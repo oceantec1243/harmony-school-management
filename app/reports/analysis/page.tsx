@@ -255,14 +255,52 @@ export default function AnalysisPage() {
     async function fetchAnalysisData() {
       setLoading(true)
       try {
-        const period = periods.find((p) => p.id === selectedPeriod)
-        if (!period) return
-
-        // Determine which period IDs to fetch grades for
-        let periodIds: string[] = [selectedPeriod]
+        let periodIds: string[] = []
         let sequencePeriods: { id: string; number: number }[] = []
-        
-        if (period.type === "trimester" && period.number) {
+        let period = periods.find((p) => p.id === selectedPeriod)
+        let isPeriodAnnual = false
+        let academicYear = ""
+
+        // Check if it's an annual period pseudo-ID
+        if (selectedPeriod.startsWith("annual_")) {
+          academicYear = selectedPeriod.split("_")[1]
+          isPeriodAnnual = true
+          
+          // For annual analysis, get all sequences for the year
+          const { data: seqPeriods } = await supabase
+            .from("academic_periods")
+            .select("id, number")
+            .eq("type", "sequence")
+            .eq("academic_year", academicYear)
+            .order("number", { ascending: true })
+          
+          if (seqPeriods && seqPeriods.length > 0) {
+            periodIds = seqPeriods.map((p) => p.id)
+            sequencePeriods = seqPeriods
+          }
+        } else if (period) {
+          academicYear = period.academic_year
+          isPeriodAnnual = period.type === "year"
+          
+          if (isPeriodAnnual) {
+            // For annual analysis, get all sequences for the year
+            const { data: seqPeriods } = await supabase
+              .from("academic_periods")
+              .select("id, number")
+              .eq("type", "sequence")
+              .eq("academic_year", period.academic_year)
+              .order("number", { ascending: true })
+            
+            if (seqPeriods && seqPeriods.length > 0) {
+              periodIds = seqPeriods.map((p) => p.id)
+              sequencePeriods = seqPeriods
+            }
+          }
+        } else {
+          return
+        }
+
+        if (!isPeriodAnnual && period && period.type === "trimester" && period.number) {
           // For trimesters, get the two sequence periods
           const seq1Num = (period.number - 1) * 2 + 1
           const seq2Num = (period.number - 1) * 2 + 2
@@ -544,12 +582,16 @@ export default function AnalysisPage() {
         setClassAnalyses(classAnalysesData)
 
         console.log("[v0] Analysis data loaded successfully:", {
-          periodId: selectedPeriod,
-          periodType: period.type,
+          selectedPeriod,
+          isAnnual: isPeriodAnnual,
+          academicYear,
+          periodIds: periodIds.length,
           totalStudents: studentAnalyses.length,
           totalClasses: classAnalysesData.length,
           totalGrades: grades.length,
           subjectCount: subjectPerfData.length,
+          groupCount: Array.from(groupMap.entries()).length,
+          comparisonDataCount: classAnalysesData.length,
         })
 
         // School-wide stats
@@ -909,10 +951,20 @@ export default function AnalysisPage() {
                   <SelectValue placeholder="Sélectionner une période" />
                 </SelectTrigger>
                 <SelectContent>
-                  {periods.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name} ({p.academic_year})
-                    </SelectItem>
+                  {/* Group periods by year and add annual option */}
+                  {Array.from(new Set(periods.map((p) => p.academic_year))).map((year) => (
+                    <div key={year}>
+                      <SelectItem value={`annual_${year}`} className="font-bold">
+                        📊 Année complète {year}
+                      </SelectItem>
+                      {periods
+                        .filter((p) => p.academic_year === year)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name} ({p.academic_year})
+                          </SelectItem>
+                        ))}
+                    </div>
                   ))}
                 </SelectContent>
               </Select>

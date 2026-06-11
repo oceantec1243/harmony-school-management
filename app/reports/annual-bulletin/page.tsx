@@ -122,6 +122,8 @@ export default function AnnualBulletinPage() {
   const [years, setYears] = useState<string[]>([])
   const [sections, setSections] = useState<{ id: string; name: string }[]>([])
   const [selectedSection, setSelectedSection] = useState<string>("all")
+  const [selectedTrimester, setSelectedTrimester] = useState<string>("all")
+  const [trimesters, setTrimesters] = useState<AcademicPeriod[]>([])
   const [activeTab, setActiveTab] = useState("overview")
 
   // Data state
@@ -179,6 +181,30 @@ export default function AnnualBulletinPage() {
     fetchInitialData()
   }, [])
 
+  // Load trimesters when academic year changes
+  useEffect(() => {
+    if (!academicYear) return
+
+    async function loadTrimesters() {
+      try {
+        const { data: trimestersRes } = await supabase
+          .from("academic_periods")
+          .select("*")
+          .eq("type", "trimester")
+          .eq("academic_year", academicYear)
+          .order("number", { ascending: true })
+        
+        setTrimesters((trimestersRes || []) as AcademicPeriod[])
+        setSelectedTrimester("all")  // Reset to "all" when year changes
+        console.log("[v0] Trimesters loaded for year:", academicYear, (trimestersRes || []).length)
+      } catch (error) {
+        console.error("[v0] Error loading trimesters:", error)
+      }
+    }
+
+    loadTrimesters()
+  }, [academicYear])
+
   // Fetch annual data
   useEffect(() => {
     if (!academicYear) {
@@ -189,16 +215,41 @@ export default function AnnualBulletinPage() {
     async function fetchAnnualData() {
       setLoading(true)
       try {
-        // Fetch all sequences for the year
-        const { data: periodsData } = await supabase
-          .from("academic_periods")
-          .select("*")
-          .eq("type", "sequence")
-          .eq("academic_year", academicYear)
-          .order("number", { ascending: true })
+        let periods: AcademicPeriod[] = []
+        let periodIds: string[] = []
 
-        const periods = (periodsData || []) as AcademicPeriod[]
-        const periodIds = periods.map((p) => p.id)
+        // Determine which sequences to fetch based on trimester selection
+        if (selectedTrimester === "all") {
+          // Fetch all sequences for the year
+          const { data: periodsData } = await supabase
+            .from("academic_periods")
+            .select("*")
+            .eq("type", "sequence")
+            .eq("academic_year", academicYear)
+            .order("number", { ascending: true })
+
+          periods = (periodsData || []) as AcademicPeriod[]
+          periodIds = periods.map((p) => p.id)
+        } else {
+          // Fetch sequences for the selected trimester
+          const selectedTrimesterData = trimesters.find((t) => t.id === selectedTrimester)
+          if (!selectedTrimesterData) {
+            setSequenceData([])
+            setAnnualStudents([])
+            setLoading(false)
+            return
+          }
+
+          const { data: periodsData } = await supabase
+            .from("academic_periods")
+            .select("*")
+            .eq("type", "sequence")
+            .eq("parent_id", selectedTrimester)
+            .order("number", { ascending: true })
+
+          periods = (periodsData || []) as AcademicPeriod[]
+          periodIds = periods.map((p) => p.id)
+        }
 
         if (periodIds.length === 0) {
           setSequenceData([])
@@ -345,6 +396,14 @@ export default function AnnualBulletinPage() {
 
         setSequenceData(sequencesData)
 
+        console.log("[v0] Sequences loaded:", {
+          selectedTrimester,
+          periodCount: periods.length,
+          gradeCount: grades.length,
+          studentCount: sequencesData.reduce((sum, seq) => sum + seq.students.size, 0),
+          sequences: periods.map((p) => `Seq${p.number}`),
+        })
+
         // Calculate annual summaries for each student
         const allStudentIds = new Set<string>()
         sequencesData.forEach((seq) => {
@@ -430,7 +489,7 @@ export default function AnnualBulletinPage() {
     }
 
     fetchAnnualData()
-  }, [academicYear, selectedSection])
+  }, [academicYear, selectedSection, selectedTrimester, trimesters])
 
   // Prepare chart data
   const sequenceChartData = useMemo(() => {
@@ -624,6 +683,24 @@ export default function AnnualBulletinPage() {
               {sections.map((section) => (
                 <SelectItem key={section.id} value={section.id}>
                   {section.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={selectedTrimester} onValueChange={setSelectedTrimester}>
+            <SelectTrigger className="w-full md:w-48">
+              <SelectValue placeholder="Période" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                {language === "fr" ? "Toute l'année" : "Full Year"}
+              </SelectItem>
+              {trimesters.map((trimester) => (
+                <SelectItem key={trimester.id} value={trimester.id}>
+                  {language === "fr"
+                    ? `${trimester.number}${trimester.number === 1 ? "er" : "e"} trimestre`
+                    : `Term ${trimester.number}`}
                 </SelectItem>
               ))}
             </SelectContent>
