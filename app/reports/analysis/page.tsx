@@ -543,6 +543,15 @@ export default function AnalysisPage() {
         classAnalysesData.sort((a, b) => b.average - a.average)
         setClassAnalyses(classAnalysesData)
 
+        console.log("[v0] Analysis data loaded successfully:", {
+          periodId: selectedPeriod,
+          periodType: period.type,
+          totalStudents: studentAnalyses.length,
+          totalClasses: classAnalysesData.length,
+          totalGrades: grades.length,
+          subjectCount: subjectPerfData.length,
+        })
+
         // School-wide stats
         const totalStudentsCount = studentAnalyses.length
         const schoolAvg = totalStudentsCount > 0

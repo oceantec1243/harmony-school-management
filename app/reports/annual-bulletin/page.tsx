@@ -148,21 +148,32 @@ export default function AnnualBulletinPage() {
   // Fetch years and initial data
   useEffect(() => {
     async function fetchInitialData() {
-      const { data: periodsRes } = await supabase
-        .from("academic_periods")
-        .select("academic_year")
-        .order("academic_year", { ascending: false })
-        .distinct()
+      try {
+        const { data: periodsRes } = await supabase
+          .from("academic_periods")
+          .select("academic_year")
+          .order("academic_year", { ascending: false })
+          .distinct()
 
-      const uniqueYears = [...new Set((periodsRes || []).map((p) => p.academic_year))]
-      setYears(uniqueYears)
+        const uniqueYears = [...new Set((periodsRes || []).map((p) => p.academic_year))]
+        console.log("[v0] Academic years loaded:", uniqueYears)
+        setYears(uniqueYears)
 
-      if (uniqueYears.length > 0) {
-        setAcademicYear(uniqueYears[0])
+        if (uniqueYears.length > 0) {
+          console.log("[v0] Setting initial academic year to:", uniqueYears[0])
+          setAcademicYear(uniqueYears[0])
+        } else {
+          console.warn("[v0] No academic years found in database")
+          setLoading(false)
+        }
+
+        const { data: sectionsRes } = await supabase.from("sections").select("id, name")
+        setSections(sectionsRes || [])
+        console.log("[v0] Sections loaded:", (sectionsRes || []).length)
+      } catch (error) {
+        console.error("[v0] Error fetching initial data:", error)
+        setLoading(false)
       }
-
-      const { data: sectionsRes } = await supabase.from("sections").select("id, name")
-      setSections(sectionsRes || [])
     }
 
     fetchInitialData()
@@ -170,7 +181,10 @@ export default function AnnualBulletinPage() {
 
   // Fetch annual data
   useEffect(() => {
-    if (!academicYear) return
+    if (!academicYear) {
+      setLoading(false)
+      return
+    }
 
     async function fetchAnnualData() {
       setLoading(true)
@@ -403,9 +417,14 @@ export default function AnnualBulletinPage() {
           atRiskCount: annualSummaries.filter((s) => s.annualAverage < 8).length,
         })
 
+        console.log("[v0] Annual bulletin data loaded successfully:", {
+          sequenceCount: sequencesData.length,
+          studentCount: annualSummaries.length,
+          schoolAvg: schoolStats.annualAverage,
+        })
         setLoading(false)
       } catch (error) {
-        console.error("Error fetching annual data:", error)
+        console.error("[v0] Error fetching annual data:", error)
         setLoading(false)
       }
     }
