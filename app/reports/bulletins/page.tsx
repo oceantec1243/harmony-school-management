@@ -329,6 +329,9 @@ export default function BulletinsPage() {
 
         if (studentError || !student) throw new Error("Élève non trouvé")
 
+        // Determine language first
+        const isEnglish = student.class?.section?.name?.toLowerCase().includes("anglophone") || false
+
         // Handle annual period pseudo-IDs
         let period = periods.find((p) => p.id === selectedPeriod)
         let isAnnualPeriod = false
@@ -384,7 +387,6 @@ export default function BulletinsPage() {
         const levelId = student.class?.level_id
         const classId = student.class_id
         const isTrimestriel = period.type === "trimester"
-        const isEnglish = student.class?.section?.name?.toLowerCase().includes("anglophone")
 
         // Fetch class subjects with teachers
         const { data: classSubjectsData } = await supabase

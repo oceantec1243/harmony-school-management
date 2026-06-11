@@ -274,7 +274,7 @@ export default function AnalysisPage() {
       try {
         let periodIds: string[] = []
         let sequencePeriods: { id: string; number: number }[] = []
-        let period = periods.find((p) => p.id === selectedPeriod)
+        let period: any = null
         let isPeriodAnnual = false
         let academicYear = ""
 
@@ -295,7 +295,14 @@ export default function AnalysisPage() {
             periodIds = seqPeriods.map((p) => p.id)
             sequencePeriods = seqPeriods
           }
-        } else if (period) {
+        } else {
+          // Find actual period from the periods list
+          period = periods.find((p) => p.id === selectedPeriod)
+          
+          if (!period) {
+            return
+          }
+
           academicYear = period.academic_year
           isPeriodAnnual = period.type === "year"
           
@@ -312,26 +319,22 @@ export default function AnalysisPage() {
               periodIds = seqPeriods.map((p) => p.id)
               sequencePeriods = seqPeriods
             }
-          }
-        } else {
-          return
-        }
-
-        if (!isPeriodAnnual && period && period.type === "trimester" && period.number) {
-          // For trimesters, get the two sequence periods
-          const seq1Num = (period.number - 1) * 2 + 1
-          const seq2Num = (period.number - 1) * 2 + 2
-          
-          const { data: seqPeriods } = await supabase
-            .from("academic_periods")
-            .select("id, number")
-            .eq("type", "sequence")
-            .eq("academic_year", period.academic_year)
-            .in("number", [seq1Num, seq2Num])
-          
-          if (seqPeriods && seqPeriods.length > 0) {
-            periodIds = seqPeriods.map((p) => p.id)
-            sequencePeriods = seqPeriods
+          } else if (period.type === "trimester" && period.number) {
+            // For trimesters, get the two sequence periods
+            const seq1Num = (period.number - 1) * 2 + 1
+            const seq2Num = (period.number - 1) * 2 + 2
+            
+            const { data: seqPeriods } = await supabase
+              .from("academic_periods")
+              .select("id, number")
+              .eq("type", "sequence")
+              .eq("academic_year", period.academic_year)
+              .in("number", [seq1Num, seq2Num])
+            
+            if (seqPeriods && seqPeriods.length > 0) {
+              periodIds = seqPeriods.map((p) => p.id)
+              sequencePeriods = seqPeriods
+            }
           }
         }
 
@@ -379,11 +382,15 @@ export default function AnalysisPage() {
           unrankedMap.get(up.student_id)!.add(up.academic_period_id)
         })
 
-        // Fetch attendance data
-        const { data: attendanceData } = await supabase
-          .from("student_attendances")
-          .select("student_id, total_hours")
-          .eq("academic_period_id", selectedPeriod)
+        // Fetch attendance data (only for real periods, not annual pseudo-IDs)
+        let attendanceData: any[] = []
+        if (!isPeriodAnnual && period && period.id === selectedPeriod) {
+          const { data } = await supabase
+            .from("student_attendances")
+            .select("student_id, total_hours")
+            .eq("academic_period_id", selectedPeriod)
+          attendanceData = data || []
+        }
 
         const attendanceMap = new Map(
           (attendanceData || []).map((a) => [a.student_id, a.total_hours])
