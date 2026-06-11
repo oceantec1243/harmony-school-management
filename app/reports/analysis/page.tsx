@@ -220,6 +220,9 @@ export default function AnalysisPage() {
 
   const supabase = createClient()
 
+  // Track all active students for effectif calculation
+  const [allActiveStudents, setAllActiveStudents] = useState<{ classId: string; count: number }[]>([])
+
   // Fetch initial data
   useEffect(() => {
     async function fetchInitialData() {
@@ -236,6 +239,20 @@ export default function AnalysisPage() {
       setPeriods(periodsRes.data || [])
       setClasses(classesRes.data || [])
       setSections(sectionsRes.data || [])
+
+      // Fetch count of active students per class
+      const { data: classStudentCounts } = await supabase
+        .from("students")
+        .select("class_id")
+        .ilike("status", "active")
+
+      const countByClass = new Map<string, number>()
+      if (classStudentCounts) {
+        for (const student of classStudentCounts) {
+          countByClass.set(student.class_id, (countByClass.get(student.class_id) || 0) + 1)
+        }
+      }
+      setAllActiveStudents(Array.from(countByClass.entries()).map(([classId, count]) => ({ classId, count })))
 
       // Set default period (latest trimester)
       const trimesters = (periodsRes.data || []).filter((p) => p.type === "trimester")
@@ -255,28 +272,69 @@ export default function AnalysisPage() {
     async function fetchAnalysisData() {
       setLoading(true)
       try {
-        const period = periods.find((p) => p.id === selectedPeriod)
-        if (!period) return
-
-        // Determine which period IDs to fetch grades for
-        let periodIds: string[] = [selectedPeriod]
+        let periodIds: string[] = []
         let sequencePeriods: { id: string; number: number }[] = []
-        
-        if (period.type === "trimester" && period.number) {
-          // For trimesters, get the two sequence periods
-          const seq1Num = (period.number - 1) * 2 + 1
-          const seq2Num = (period.number - 1) * 2 + 2
+        let period: any = null
+        let isPeriodAnnual = false
+        let academicYear = ""
+
+        // Check if it's an annual period pseudo-ID
+        if (selectedPeriod.startsWith("annual_")) {
+          academicYear = selectedPeriod.split("_")[1]
+          isPeriodAnnual = true
           
+          // For annual analysis, get all sequences for the year
           const { data: seqPeriods } = await supabase
             .from("academic_periods")
             .select("id, number")
             .eq("type", "sequence")
-            .eq("academic_year", period.academic_year)
-            .in("number", [seq1Num, seq2Num])
+            .eq("academic_year", academicYear)
+            .order("number", { ascending: true })
           
           if (seqPeriods && seqPeriods.length > 0) {
             periodIds = seqPeriods.map((p) => p.id)
             sequencePeriods = seqPeriods
+          }
+        } else {
+          // Find actual period from the periods list
+          period = periods.find((p) => p.id === selectedPeriod)
+          
+          if (!period) {
+            return
+          }
+
+          academicYear = period.academic_year
+          isPeriodAnnual = period.type === "year"
+          
+          if (isPeriodAnnual) {
+            // For annual analysis, get all sequences for the year
+            const { data: seqPeriods } = await supabase
+              .from("academic_periods")
+              .select("id, number")
+              .eq("type", "sequence")
+              .eq("academic_year", period.academic_year)
+              .order("number", { ascending: true })
+            
+            if (seqPeriods && seqPeriods.length > 0) {
+              periodIds = seqPeriods.map((p) => p.id)
+              sequencePeriods = seqPeriods
+            }
+          } else if (period.type === "trimester" && period.number) {
+            // For trimesters, get the two sequence periods
+            const seq1Num = (period.number - 1) * 2 + 1
+            const seq2Num = (period.number - 1) * 2 + 2
+            
+            const { data: seqPeriods } = await supabase
+              .from("academic_periods")
+              .select("id, number")
+              .eq("type", "sequence")
+              .eq("academic_year", period.academic_year)
+              .in("number", [seq1Num, seq2Num])
+            
+            if (seqPeriods && seqPeriods.length > 0) {
+              periodIds = seqPeriods.map((p) => p.id)
+              sequencePeriods = seqPeriods
+            }
           }
         }
 
@@ -324,11 +382,15 @@ export default function AnalysisPage() {
           unrankedMap.get(up.student_id)!.add(up.academic_period_id)
         })
 
-        // Fetch attendance data
-        const { data: attendanceData } = await supabase
-          .from("student_attendances")
-          .select("student_id, total_hours")
-          .eq("academic_period_id", selectedPeriod)
+        // Fetch attendance data (only for real periods, not annual pseudo-IDs)
+        let attendanceData: any[] = []
+        if (!isPeriodAnnual && period && period.id === selectedPeriod) {
+          const { data } = await supabase
+            .from("student_attendances")
+            .select("student_id, total_hours")
+            .eq("academic_period_id", selectedPeriod)
+          attendanceData = data || []
+        }
 
         const attendanceMap = new Map(
           (attendanceData || []).map((a) => [a.student_id, a.total_hours])
@@ -542,6 +604,19 @@ export default function AnalysisPage() {
 
         classAnalysesData.sort((a, b) => b.average - a.average)
         setClassAnalyses(classAnalysesData)
+
+        console.log("[v0] Analysis data loaded successfully:", {
+          selectedPeriod,
+          isAnnual: isPeriodAnnual,
+          academicYear,
+          periodIds: periodIds.length,
+          totalStudents: studentAnalyses.length,
+          totalClasses: classAnalysesData.length,
+          totalGrades: grades.length,
+          subjectCount: subjectPerfData.length,
+          groupCount: Array.from(groupMap.entries()).length,
+          comparisonDataCount: classAnalysesData.length,
+        })
 
         // School-wide stats
         const totalStudentsCount = studentAnalyses.length
@@ -900,10 +975,20 @@ export default function AnalysisPage() {
                   <SelectValue placeholder="Sélectionner une période" />
                 </SelectTrigger>
                 <SelectContent>
-                  {periods.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name} ({p.academic_year})
-                    </SelectItem>
+                  {/* Group periods by year and add annual option */}
+                  {Array.from(new Set(periods.map((p) => p.academic_year))).map((year) => (
+                    <div key={year}>
+                      <SelectItem value={`annual_${year}`} className="font-bold">
+                        📊 Année complète {year}
+                      </SelectItem>
+                      {periods
+                        .filter((p) => p.academic_year === year)
+                        .map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name} ({p.academic_year})
+                          </SelectItem>
+                        ))}
+                    </div>
                   ))}
                 </SelectContent>
               </Select>
@@ -964,7 +1049,16 @@ export default function AnalysisPage() {
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">Effectif</p>
-                    <p className="text-2xl font-bold text-primary">{filteredStudents.length}</p>
+                    <p className="text-2xl font-bold text-primary">
+                      {selectedClass === "all"
+                        ? selectedSection === "all"
+                          ? allActiveStudents.reduce((sum, c) => sum + c.count, 0)
+                          : allActiveStudents.reduce((sum, c) => {
+                              const classData = classes.find((cl) => cl.id === c.classId)
+                              return classData?.section?.name === selectedSection ? sum + c.count : sum
+                            }, 0)
+                        : allActiveStudents.find((c) => c.classId === selectedClass)?.count || 0}
+                    </p>
                   </div>
                 </div>
               </CardContent>
