@@ -176,3 +176,67 @@ export function getPassStatus(average: number): { passed: boolean; message: stri
   }
   return { passed: false, message: "Ajourné(e)" }
 }
+
+// Class progression map
+const CLASS_PROGRESSIONS: Record<string, Record<string, string>> = {
+  francophone: {
+    "6ème": "5ème",
+    "5ème": "4ème",
+    "4ème": "3ème",
+    "3ème": "Seconde",
+    "Seconde": "Première",
+    "Première": "Terminale",
+  },
+  anglophone: {
+    "Form 1": "Form 2",
+    "Form 2": "Form 3",
+    "Form 3": "Form 4",
+    "Form 4": "Form 5",
+    "Form 5": "Upper 6",
+  },
+}
+
+// Get next class based on current level and section
+export function getNextClass(currentClass: string, section: string): string | null {
+  const sectionKey = section?.toLowerCase().includes("anglophone") ? "anglophone" : "francophone"
+  const progressions = CLASS_PROGRESSIONS[sectionKey]
+
+  if (!progressions) return null
+
+  // Try to find exact match or similar match
+  const cleanedClass = currentClass.trim()
+  
+  for (const [key, value] of Object.entries(progressions)) {
+    if (cleanedClass === key || cleanedClass.toLowerCase() === key.toLowerCase()) {
+      return value
+    }
+  }
+
+  // If no match found, return null (already at terminal level)
+  return null
+}
+
+// Determine promotion decision
+export function determinePromotion(
+  average: number,
+  currentClass: string,
+  section: string,
+  isRanked: boolean,
+): { promoted: boolean; nextClass: string | null; decision: string } {
+  // Must be ranked and have average >= 10 to be promoted
+  if (!isRanked) {
+    return { promoted: false, nextClass: null, decision: "Non Classé - Redoublement recommandé" }
+  }
+
+  if (average < 10) {
+    return { promoted: false, nextClass: null, decision: "Ajourné(e) - Redoublement" }
+  }
+
+  const nextClass = getNextClass(currentClass, section)
+
+  if (!nextClass) {
+    return { promoted: true, nextClass: null, decision: "Admis(e) - Fin de cycle" }
+  }
+
+  return { promoted: true, nextClass, decision: `Promu(e) en ${nextClass}` }
+}
