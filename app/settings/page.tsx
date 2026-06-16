@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Save, School, Calendar, Bell, Palette, FileText, Loader2, Plus, Trash2 } from "lucide-react"
+import { Save, School, Calendar, Bell, Palette, FileText, Loader2, Plus, Trash2, GraduationCap } from "lucide-react"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { createClient } from "@/lib/supabase/client"
 import { toast } from "sonner"
 
@@ -65,6 +66,7 @@ export default function SettingsPage() {
     handle_ties: true,
   })
   const [periods, setPeriods] = useState<AcademicPeriod[]>([])
+  const [classes, setClasses] = useState<any[]>([])
   const [academicYears, setAcademicYears] = useState<string[]>(["2024-2025", "2023-2024"])
 
   const supabase = createClient()
@@ -73,9 +75,10 @@ export default function SettingsPage() {
     async function fetchData() {
       setLoading(true)
       try {
-        const [settingsRes, periodsRes] = await Promise.all([
+        const [settingsRes, periodsRes, classesRes] = await Promise.all([
           supabase.from("school_settings").select("*").maybeSingle(),
           supabase.from("academic_periods").select("*").order("academic_year", { ascending: false }).order("number"),
+          supabase.from("classes").select("*, section:sections(name), level:levels(name)").order("name"),
         ])
 
         if (settingsRes.data) {
@@ -98,6 +101,9 @@ export default function SettingsPage() {
           setPeriods(periodsRes.data)
           const years = [...new Set(periodsRes.data.map((p) => p.academic_year))]
           if (years.length > 0) setAcademicYears(years)
+        }
+        if (classesRes.data) {
+          setClasses(classesRes.data)
         }
       } catch (error) {
         console.error("[v0] Error fetching settings:", error)
@@ -123,6 +129,30 @@ export default function SettingsPage() {
       toast.error("Erreur lors de l'enregistrement")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleUpdateClassCriteria = async (classId: string, minAvg: number, unrankedThreshold: number) => {
+    try {
+      const { error } = await supabase
+        .from("classes")
+        .update({
+          min_promotion_average: minAvg,
+          unranked_coef_threshold: unrankedThreshold,
+        })
+        .eq("id", classId)
+
+      if (error) throw error
+      
+      setClasses(classes.map(c => 
+        c.id === classId 
+          ? { ...c, min_promotion_average: minAvg, unranked_coef_threshold: unrankedThreshold } 
+          : c
+      ))
+      toast.success("Critères mis à jour")
+    } catch (error) {
+      console.error("[v0] Error updating class criteria:", error)
+      toast.error("Erreur lors de la mise à jour")
     }
   }
 
@@ -201,6 +231,10 @@ export default function SettingsPage() {
           <TabsTrigger value="notifications" className="gap-2">
             <Bell className="h-4 w-4" />
             <span className="hidden sm:inline">Notifications</span>
+          </TabsTrigger>
+          <TabsTrigger value="promotion" className="gap-2">
+            <GraduationCap className="h-4 w-4" />
+            <span className="hidden sm:inline">Promotion</span>
           </TabsTrigger>
           <TabsTrigger value="appearance" className="gap-2">
             <Palette className="h-4 w-4" />
@@ -571,6 +605,77 @@ export default function SettingsPage() {
                 </div>
                 <Switch defaultChecked />
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Promotion Settings */}
+        <TabsContent value="promotion">
+          <Card>
+            <CardHeader>
+              <CardTitle>Critères de Promotion et Classement</CardTitle>
+              <CardDescription>
+                Définissez les moyennes de passage et les seuils de non-classement par classe
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Classe</TableHead>
+                    <TableHead>Niveau / Section</TableHead>
+                    <TableHead className="w-48">Moyenne de passage</TableHead>
+                    <TableHead className="w-48">Seuil Coef. Non-Classé</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {classes.map((cls) => (
+                    <TableRow key={cls.id}>
+                      <TableCell className="font-medium">{cls.name}</TableCell>
+                      <TableCell>
+                        {cls.level?.name} / {cls.section?.name}
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          defaultValue={cls.min_promotion_average || 10.0}
+                          className="w-24"
+                          id={`min-avg-${cls.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          defaultValue={cls.unranked_coef_threshold || 0}
+                          className="w-24"
+                          id={`unranked-${cls.id}`}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            const minAvg = parseFloat((document.getElementById(`min-avg-${cls.id}`) as HTMLInputElement).value)
+                            const unranked = parseInt((document.getElementById(`unranked-${cls.id}`) as HTMLInputElement).value)
+                            handleUpdateClassCriteria(cls.id, minAvg, unranked)
+                          }}
+                        >
+                          Sauvegarder
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {classes.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        Aucune classe trouvée
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>
