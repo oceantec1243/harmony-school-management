@@ -52,6 +52,7 @@ import {
 } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { cn } from "@/lib/utils"
+import { determinePromotion, calculateTrimesterAverage, formatRank } from "@/lib/calculations"
 
 // Types
 interface Student {
@@ -101,6 +102,20 @@ interface AnnualStudentSummary {
   bestSequence: number
   worstSequence: number
   trend: "improving" | "stable" | "declining"
+  // Trimester data
+  trimesterAverages: { t1: number; t2: number; t3: number }
+  // Sequence rankings
+  sequenceRankings: number[]
+  // Trimester rankings
+  trimesterRankings: { t1: number; t2: number; t3: number }
+  // Annual ranking
+  annualRank: number
+  // Promotion decision
+  promotion: {
+    promoted: boolean
+    nextClass: string | null
+    decision: string
+  }
 }
 
 // Colors and constants
