@@ -59,14 +59,6 @@ type LocalBulletinData = {
   trimesterSummaries?: Array<{ average: number | "NC"; rank: number | string }>
 }
 
-function getGradeColor(score: number | undefined | null): string {
-  if (score === undefined || score === null) return "text-muted-foreground"
-  if (score < 10) return "text-red-600 font-bold"
-  if (score < 12) return "text-amber-600"
-  if (score < 15) return "text-blue-600"
-  return "text-green-600"
-}
-
 export default function BulletinsPage() {
   const [loading, setLoading] = useState(true)
   const [classes, setClasses] = useState<ClassType[]>([])
@@ -113,7 +105,6 @@ export default function BulletinsPage() {
 
   const generateData = useCallback(async (studentId: string): Promise<LocalBulletinData | null> => {
     try {
-      // 1. Fetch Student with full class info
       const { data: student } = await supabase.from("students").select("*, class:classes(*, level:levels(*), section:sections(*), next_class:classes!next_class_id(name))").eq("id", studentId).single()
       if (!student) return null
 
@@ -128,19 +119,50 @@ export default function BulletinsPage() {
         period = periods.find(p => p.id === selectedPeriod)!
       }
 
-      // 2. Fetch ALL Subjects for the class/level
-      const { data: classSubjs } = await supabase.from("class_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("class_id", student.class_id)
-      
-      const subjects: Subject[] = (classSubjs || []).map((cs: any) => ({
-        id: cs.subject_id,
-        name: cs.subject?.name || "Sans nom",
-        code: cs.subject?.code || "",
-        coefficient: cs.coefficient || 1,
-        group_name: cs.subject?.subject_group?.name || "Autres",
-        teacher_name: cs.teacher ? `${cs.teacher.first_name || ""} ${cs.teacher.last_name || ""}`.trim() : undefined
-      }))
+      const classId = student.class_id
+      const levelId = student.class?.level_id
+      const sectionId = student.class?.section_id
 
-      // 3. Fetch Grades
+      // 1. FETCH ALL SUBJECTS (Level Core + Class Specialties)
+      const [classSubjsRes, levelSubjsRes] = await Promise.all([
+        supabase.from("class_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("class_id", classId),
+        levelId ? supabase.from("level_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("level_id", levelId).eq("section_id", sectionId) : Promise.resolve({data: []})
+      ])
+
+      const subjectsMap = new Map<string, Subject>()
+      
+      // Add level subjects first
+      levelSubjsRes.data?.forEach((ls: any) => {
+        if (ls.subject && ls.subject_id) {
+          subjectsMap.set(ls.subject_id, {
+            id: ls.subject_id,
+            name: ls.subject.name,
+            code: ls.subject.code,
+            coefficient: ls.coefficient || 1,
+            group_name: ls.subject.subject_group?.name || "Autres",
+            teacher_name: ls.teacher ? `${ls.teacher.first_name || ""} ${ls.teacher.last_name || ""}`.trim() : undefined
+          })
+        }
+      })
+
+      // Class subjects override or add to level subjects
+      classSubjsRes.data?.forEach((cs: any) => {
+        if (cs.subject && cs.subject_id) {
+          subjectsMap.set(cs.subject_id, {
+            id: cs.subject_id,
+            name: cs.subject.name,
+            code: cs.subject.code,
+            coefficient: cs.coefficient || 1,
+            group_name: cs.subject.subject_group?.name || "Autres",
+            teacher_name: cs.teacher ? `${cs.teacher.first_name || ""} ${cs.teacher.last_name || ""}`.trim() : subjectsMap.get(cs.subject_id)?.teacher_name
+          })
+        }
+      })
+
+      const subjects = Array.from(subjectsMap.values()).sort((a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name))
+      const subjectIds = subjects.map(s => s.id)
+
+      // 2. FETCH GRADES & CALCULATE
       const grades: Record<string, { score: number; coefficient: number }> = {}
       let trimesterSummaries: any[] = []
       let promotion: any = undefined
@@ -149,10 +171,14 @@ export default function BulletinsPage() {
         const yearPeriods = periods.filter(p => p.academic_year === academicYear)
         const yearSeqs = yearPeriods.filter(p => p.type === "sequence")
         const yearTrims = yearPeriods.filter(p => p.type === "trimester")
-        const { data: yearGrades } = await supabase.from("grades").select("*").eq("student_id", studentId).in("academic_period_id", yearSeqs.map(s => s.id))
+        
+        // Fetch ALL grades for ranking and display
+        const { data: allClassGrades } = await supabase.from("grades").select("student_id, subject_id, score, academic_period_id").in("academic_period_id", yearSeqs.map(s => s.id))
+        
+        const myGrades = (allClassGrades || []).filter(g => g.student_id === studentId)
 
         subjects.forEach(s => {
-          const sGrades = (yearGrades || []).filter(g => g.subject_id === s.id)
+          const sGrades = myGrades.filter(g => g.subject_id === s.id)
           const trimAvgs = yearTrims.map(trim => {
             const tSeqs = yearSeqs.filter(seq => seq.parent_id === trim.id || (trim.number === 1 && seq.number <= 2) || (trim.number === 2 && seq.number >= 3 && seq.number <= 4) || (trim.number === 3 && seq.number >= 5))
             const tGrades = sGrades.filter(g => tSeqs.some(ts => ts.id === g.academic_period_id))
@@ -161,25 +187,58 @@ export default function BulletinsPage() {
           })
           const numericTrims = trimAvgs.filter(t => typeof t === 'number') as number[]
           const annualAvg = numericTrims.length > 0 ? Math.round((numericTrims.reduce((a, b) => a + b, 0) / numericTrims.length) * 100) / 100 : "NC"
+          
           s.trimesters = trimAvgs
           s.annual = annualAvg
           if (typeof annualAvg === 'number') grades[s.id] = { score: annualAvg, coefficient: s.coefficient }
+
+          // Calculate subject rank
+          const otherAvgs = students.filter(os => os.is_ranked !== false).map(os => {
+            const osG = (allClassGrades || []).filter(g => g.student_id === os.id && g.subject_id === s.id)
+            return osG.length > 0 ? osG.reduce((sum, g) => sum + g.score, 0) / osG.length : null
+          }).filter(v => v !== null) as number[]
+          
+          if (typeof annualAvg === 'number' && otherAvgs.length > 0) {
+            const sorted = otherAvgs.sort((a,b) => b-a)
+            let r = 1
+            for (const v of sorted) { if (v > annualAvg) r++; else break }
+            s.rank = `${r}/${sorted.length}`
+          }
         })
 
-        // Trimester overall averages
+        // Trimester overall summaries
         trimesterSummaries = yearTrims.map((trim, idx) => {
+          const tSeqs = yearSeqs.filter(seq => seq.parent_id === trim.id || (trim.number === 1 && seq.number <= 2) || (trim.number === 2 && seq.number >= 3 && seq.number <= 4) || (trim.number === 3 && seq.number >= 5))
+          
+          const studentTrimAvgs = students.filter(os => os.is_ranked !== false).map(os => {
+            const osG = (allClassGrades || []).filter(g => g.student_id === os.id && tSeqs.some(ts => ts.id === g.academic_period_id))
+            let tw = 0, tc = 0
+            subjects.forEach(subj => {
+              const sg = osG.filter(g => g.subject_id === subj.id)
+              if (sg.length > 0) { tw += (sg.reduce((sum, g) => sum + g.score, 0) / sg.length) * subj.coefficient; tc += subj.coefficient }
+            })
+            return tc > 0 ? tw / tc : null
+          }).filter(v => v !== null) as number[]
+
+          let myAvg: number | "NC" = "NC"
           let tw = 0, tc = 0
-          subjects.forEach(s => {
-            const tVal = s.trimesters?.[idx]
-            if (typeof tVal === 'number') { tw += tVal * s.coefficient; tc += s.coefficient }
-          })
-          return { average: tc > 0 ? Math.round((tw / tc) * 100) / 100 : "NC", rank: "-" }
+          subjects.forEach(s => { if (typeof s.trimesters?.[idx] === 'number') { tw += (s.trimesters[idx] as number) * s.coefficient; tc += s.coefficient } })
+          if (tc > 0) myAvg = Math.round((tw / tc) * 100) / 100
+
+          let r = "-"
+          if (typeof myAvg === 'number' && studentTrimAvgs.length > 0) {
+            const sorted = studentTrimAvgs.sort((a,b) => b-a)
+            let rn = 1
+            for (const v of sorted) { if (v > myAvg) rn++; else break }
+            r = `${rn}/${sorted.length}`
+          }
+          return { average: myAvg, rank: r }
         })
 
         const totalP = Object.values(grades).reduce((s, g) => s + g.score * g.coefficient, 0)
         const totalC = Object.values(grades).reduce((s, g) => s + g.coefficient, 0)
         const avg = totalC > 0 ? totalP / totalC : 0
-        promotion = determinePromotion(avg, student.class?.name || "", student.class?.section?.name || "", student.is_ranked !== false, student.class?.min_promotion_average || 10, student.class?.min_rattrapage_average || 8, student.class?.next_class?.name || null)
+        promotion = determinePromotion(avg, student.class?.name || "", student.class?.section?.name || "", student.is_ranked !== false, student.class?.min_promotion_average || 10, student.class?.min_rattrapage_average || 8, student.class?.min_honor_roll_average || 12, student.class?.next_class?.name || null)
       } else {
         const { data: gData } = await supabase.from("grades").select("*").eq("student_id", studentId).eq("academic_period_id", selectedPeriod)
         if (gData) gData.forEach(g => {
@@ -188,7 +247,7 @@ export default function BulletinsPage() {
         })
       }
 
-      // 4. Group Averages
+      // Group Averages
       const groupAverages: Record<string, number> = {}
       const groups = [...new Set(subjects.map(s => s.group_name))]
       groups.forEach(gn => {
@@ -202,12 +261,34 @@ export default function BulletinsPage() {
       const totalC = Object.values(grades).reduce((s, g) => s + g.coefficient, 0)
       const average = totalC > 0 ? Math.round((totalP / totalC) * 100) / 100 : 0
 
+      // Overall Class Average and Individual Rank
+      let classAverage = 0
+      let rank: number | string = "-"
+      
+      const { data: allStudentsGrades } = await supabase.from("grades").select("student_id, score, coefficient").in("academic_period_id", isAnnual ? periods.filter(p => p.academic_year === academicYear && p.type === "sequence").map(p => p.id) : [selectedPeriod])
+      
+      const studAvgsMap = new Map<string, {tw: number, tc: number}>()
+      allStudentsGrades?.forEach(g => {
+        const cur = studAvgsMap.get(g.student_id) || {tw: 0, tc: 0}
+        studAvgsMap.set(g.student_id, {tw: cur.tw + g.score * g.coefficient, tc: cur.tc + g.coefficient})
+      })
+      
+      const finalAvgs = Array.from(studAvgsMap.values()).map(v => v.tw / v.tc).sort((a,b) => b-a)
+      if (finalAvgs.length > 0) {
+        classAverage = Math.round((finalAvgs.reduce((s, a) => s + a, 0) / finalAvgs.length) * 100) / 100
+        if (student.is_ranked !== false) {
+          let r = 1
+          for (const a of finalAvgs) { if (a > average) r++; else break }
+          rank = r
+        }
+      }
+
       return {
-        student, period, subjects, grades, groupAverages, average, rank: "-", classSize: students.length, classAverage: 0,
+        student, period, subjects, grades, groupAverages, average, rank, classSize: students.length, classAverage,
         isUnranked: student.is_ranked === false, section: student.class?.section?.name, promotion, trimesterSummaries
       }
     } catch (e) { console.error(e); return null }
-  }, [supabase, selectedPeriod, periods, students.length])
+  }, [supabase, selectedPeriod, periods, students])
 
   const viewBulletin = async (sid: string) => {
     setSelectedStudentId(sid); setGenerating(true)
@@ -227,9 +308,10 @@ export default function BulletinsPage() {
         subjects: bulletinData.subjects.map(s => ({ 
           name: s.name, teacher: s.teacher_name, coefficient: s.coefficient, 
           average: typeof s.annual === 'number' ? s.annual : bulletinData.grades[s.id]?.score, 
-          trimesters: s.trimesters, annual: s.annual, group: s.group_name 
+          trimesters: s.trimesters, annual: s.annual, group: s.group_name, rank: s.rank 
         })),
         average: bulletinData.average, rank: bulletinData.rank, classSize: bulletinData.classSize, classAverage: bulletinData.classAverage, promotion: bulletinData.promotion,
+        trimesterSummaries: bulletinData.trimesterSummaries,
         schoolSettings: { school_name: schoolSettings?.school_name, school_slogan: schoolSettings?.school_slogan, address: schoolSettings?.address, phone: schoolSettings?.phone, logo_url: schoolSettings?.logo_url }
       }
       await generateBulletinPDF(pdfData)
@@ -249,8 +331,9 @@ export default function BulletinsPage() {
             student: { firstName: d.student.first_name, lastName: d.student.last_name, matricule: d.student.matricule, isRanked: !d.isUnranked },
             className: d.student.class?.name || "", periodName: d.period.name, periodType: d.period.type as any,
             academicYear: d.period.academic_year, section: d.section || "",
-            subjects: d.subjects.map(s => ({ name: s.name, teacher: s.teacher_name, coefficient: s.coefficient, average: typeof s.annual === 'number' ? s.annual : d.grades[s.id]?.score, trimesters: s.trimesters, annual: s.annual, group: s.group_name })),
+            subjects: d.subjects.map(subj => ({ name: subj.name, teacher: subj.teacher_name, coefficient: subj.coefficient, average: typeof subj.annual === 'number' ? subj.annual : d.grades[subj.id]?.score, trimesters: subj.trimesters, annual: subj.annual, group: subj.group_name, rank: subj.rank })),
             average: d.average, rank: d.rank, classSize: d.classSize, classAverage: d.classAverage, promotion: d.promotion,
+            trimesterSummaries: d.trimesterSummaries,
             schoolSettings: { school_name: schoolSettings?.school_name, school_slogan: schoolSettings?.school_slogan, address: schoolSettings?.address, phone: schoolSettings?.phone, logo_url: schoolSettings?.logo_url }
           })
         }
@@ -306,8 +389,8 @@ export default function BulletinsPage() {
         <Dialog open={showBulletin} onOpenChange={setShowBulletin}>
           <DialogContent className="max-w-5xl max-h-[95vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Aperçu du Bulletin de {bulletinData?.student?.first_name}</DialogTitle>
-              <DialogDescription>Aperçu du document officiel avant téléchargement.</DialogDescription>
+              <DialogTitle>Aperçu du Bulletin de {bulletinData?.student?.first_name} {bulletinData?.student?.last_name}</DialogTitle>
+              <DialogDescription>Aperçu du document officiel conforme au modèle camerounais.</DialogDescription>
             </DialogHeader>
             {bulletinData && <BulletinDocument bulletinData={bulletinData as any} schoolSettings={schoolSettings} />}
             <div className="flex justify-end mt-4 gap-2"><Button variant="outline" onClick={() => setShowBulletin(false)}>Fermer</Button><Button onClick={handleDownload} disabled={downloading}>{downloading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />} Télécharger PDF</Button></div>

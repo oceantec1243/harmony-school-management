@@ -222,7 +222,6 @@ export interface PromotionResult {
   decision: string
 }
 
-// Determine promotion decision
 export function determinePromotion(
   average: number,
   currentClass: string,
@@ -230,6 +229,7 @@ export function determinePromotion(
   isRanked: boolean,
   minPromotionAvg: number = 10,
   minRattrapageAvg: number = 8,
+  minHonorRollAvg: number = 12,
   targetClassName: string | null = null
 ): PromotionResult {
   // Must be ranked to be promoted
@@ -237,9 +237,19 @@ export function determinePromotion(
     return { promoted: false, nextClass: null, decision: "Non Classé - Redoublement" }
   }
 
+  let decision = ""
+  let promoted = false
+  const nextClass = targetClassName || getNextClass(currentClass, section)
+
   if (average >= minPromotionAvg) {
-    const nextClass = targetClassName || getNextClass(currentClass, section)
-    return { promoted: true, nextClass, decision: nextClass ? `Promu(e) en ${nextClass}` : "Admis(e) - Fin de cycle" }
+    promoted = true
+    decision = nextClass ? `Promu(e) en ${nextClass}` : "Admis(e) - Fin de cycle"
+    
+    if (average >= minHonorRollAvg) {
+      decision += " + Tableau d'Honneur"
+    }
+    
+    return { promoted, nextClass, decision }
   }
 
   if (average >= minRattrapageAvg) {

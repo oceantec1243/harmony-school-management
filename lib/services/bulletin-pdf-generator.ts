@@ -1,12 +1,5 @@
 import jsPDF from "jspdf"
-import "jspdf-autotable"
-
-// Extending jsPDF with autotable
-declare module "jspdf" {
-  interface jsPDF {
-    autoTable: (options: any) => jsPDF
-  }
-}
+import autoTable from "jspdf-autotable"
 
 interface BulletinSubject {
   name: string
@@ -151,7 +144,7 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
 
     if (gCoef > 0) {
       tableRows.push([
-        { content: `MOYENNE ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic" } },
+        { content: `MOYENNE ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 6.5 } },
         gCoef,
         { content: (gWeighted / gCoef).toFixed(2), colSpan: isAnnual ? 4 : 1, styles: { halign: "center", fontStyle: "bold", textColor: [30, 64, 175] } },
         "", ""
@@ -159,7 +152,7 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
     }
   })
 
-  pdf.autoTable({
+  autoTable(pdf, {
     startY: 75,
     head: [
       isAnnual 
@@ -184,12 +177,12 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
   })
 
   // --- FOOTER SUMMARY ---
-  let finalY = (pdf as any).lastAutoTable.finalY + 10
-  if (finalY > pageHeight - 60) { pdf.addPage(); finalY = 20 }
+  let finalY = (pdf as any).lastAutoTable.finalY + 8
+  if (finalY > pageHeight - 65) { pdf.addPage(); finalY = 20 }
 
   // Trimester Summary Table
   if (isAnnual && data.trimesterSummaries) {
-    pdf.autoTable({
+    autoTable(pdf, {
       startY: finalY,
       head: [["PÉRIODE", "MOYENNE", "RANG"]],
       body: [
@@ -198,24 +191,25 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
       ],
       theme: "grid",
       margin: { left: 15 },
-      tableWidth: 80,
-      styles: { fontSize: 8 },
+      tableWidth: 70,
+      styles: { fontSize: 7.5 },
       headStyles: { fillColor: [51, 65, 85] }
     })
   }
 
-  const resultX = isAnnual ? 110 : 15
-  const resultY = isAnnual ? finalY : finalY
+  const resultX = isAnnual ? 100 : 15
+  const resultY = finalY
   
   pdf.setFont("helvetica", "bold")
   pdf.setFontSize(10)
+  pdf.setTextColor(0)
   pdf.text(`MOYENNE GÉNÉRALE: ${data.average.toFixed(2)} / 20`, resultX, resultY + 5)
-  pdf.text(`RANG: ${data.rank} sur ${data.classSize}`, resultX, resultY + 12)
+  pdf.text(`RANG GLOBAL: ${data.rank} sur ${data.classSize}`, resultX, resultY + 12)
   pdf.text(`DÉCISION: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "TRAVAIL PASSABLE"}`, resultX, resultY + 19)
 
   // Signatures
-  const sigY = pageHeight - 25
-  pdf.setFontSize(9)
+  const sigY = pageHeight - 20
+  pdf.setFontSize(8)
   pdf.text("Le Parent", 25, sigY)
   pdf.text("Le Principal", pageWidth / 2, sigY, { align: "center" })
   pdf.text("Le Prof. Principal", pageWidth - 50, sigY)
@@ -229,9 +223,9 @@ export const generateBulletinPDF = async (data: BulletinData) => {
 
 export const generateMassBulletinsPDF = async (dataList: BulletinData[], filename: string) => {
   const pdf = new jsPDF()
-  dataList.forEach((data, i) => {
+  for (let i = 0; i < dataList.length; i++) {
     if (i > 0) pdf.addPage()
-    drawBulletinPage(pdf, data)
-  })
+    drawBulletinPage(pdf, dataList[i])
+  }
   pdf.save(`${filename}.pdf`)
 }

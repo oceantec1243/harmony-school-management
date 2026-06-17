@@ -117,7 +117,7 @@ export function PerformanceChart() {
             Aucune donnée disponible
           </div>
         ) : (
-          <div style={{ minHeight: 300, height: 300, width: "100%" }}>
+          <div className="h-[300px] w-full min-h-[300px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />

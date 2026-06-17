@@ -70,24 +70,24 @@ export function DistributionChart() {
   }
 
   const total = data.reduce((sum, d) => sum + d.value, 0)
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold flex items-center gap-2">
-          <Users className="h-5 w-5 text-secondary" />
-          Répartition par Section
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {total === 0 ? (
-          <div className="h-[250px] flex items-center justify-center text-muted-foreground">
-            Aucune donnée disponible
-          </div>
-        ) : (
-          <div style={{ minHeight: 250, height: 250, width: "100%" }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
+return (
+  <Card>
+    <CardHeader>
+      <CardTitle className="text-lg font-semibold flex items-center gap-2">
+        <Users className="h-5 w-5 text-secondary" />
+        Répartition par Section
+      </CardTitle>
+    </CardHeader>
+    <CardContent>
+      {total === 0 ? (
+        <div className="h-[250px] flex items-center justify-center text-muted-foreground">
+          Aucune donnée disponible
+        </div>
+      ) : (
+        <div className="h-[250px] w-full min-h-[250px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+...
                 <Pie
                   data={data}
                   cx="50%"

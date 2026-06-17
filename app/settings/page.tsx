@@ -138,6 +138,7 @@ export default function SettingsPage() {
     unrankedThreshold: number,
     rattrapageAvg: number,
     honorRollAvg: number,
+    repetitionAvg: number,
     nextClassId: string | null
   ) => {
     try {
@@ -147,7 +148,8 @@ export default function SettingsPage() {
           min_promotion_average: minAvg,
           unranked_coef_threshold: unrankedThreshold,
           min_rattrapage_average: rattrapageAvg,
-          min_honor_roll_average: honorRollAvg,
+          min_honor_roll_average: honorAvg,
+          min_repetition_average: repetitionAvg,
           next_class_id: nextClassId === "none" ? null : nextClassId
         })
         .eq("id", classId)
@@ -161,7 +163,8 @@ export default function SettingsPage() {
               min_promotion_average: minAvg, 
               unranked_coef_threshold: unrankedThreshold,
               min_rattrapage_average: rattrapageAvg,
-              min_honor_roll_average: honorRollAvg,
+              min_honor_roll_average: honorAvg,
+              min_repetition_average: repetitionAvg,
               next_class_id: nextClassId === "none" ? null : nextClassId
             } 
           : c
@@ -642,6 +645,7 @@ export default function SettingsPage() {
                     <TableHead>Classe</TableHead>
                     <TableHead className="w-24 text-center">Passage</TableHead>
                     <TableHead className="w-24 text-center">Rattrapage</TableHead>
+                    <TableHead className="w-24 text-center">Redoubl.</TableHead>
                     <TableHead className="w-24 text-center">T. Honneur</TableHead>
                     <TableHead className="w-24 text-center">Seuil NC</TableHead>
                     <TableHead className="w-40">Classe Sup.</TableHead>
@@ -662,7 +666,7 @@ export default function SettingsPage() {
                           type="number"
                           step="0.01"
                           defaultValue={cls.min_promotion_average || 10.0}
-                          className="w-16 mx-auto text-center h-8"
+                          className="w-16 mx-auto text-center h-8 px-1"
                           id={`min-avg-${cls.id}`}
                         />
                       </TableCell>
@@ -671,7 +675,7 @@ export default function SettingsPage() {
                           type="number"
                           step="0.01"
                           defaultValue={cls.min_rattrapage_average || 8.0}
-                          className="w-16 mx-auto text-center h-8"
+                          className="w-16 mx-auto text-center h-8 px-1"
                           id={`rattrapage-avg-${cls.id}`}
                         />
                       </TableCell>
@@ -679,8 +683,17 @@ export default function SettingsPage() {
                         <Input
                           type="number"
                           step="0.01"
+                          defaultValue={cls.min_repetition_average || 7.0}
+                          className="w-16 mx-auto text-center h-8 px-1"
+                          id={`repetition-avg-${cls.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
+                          step="0.01"
                           defaultValue={cls.min_honor_roll_average || 12.0}
-                          className="w-16 mx-auto text-center h-8"
+                          className="w-16 mx-auto text-center h-8 px-1"
                           id={`honor-avg-${cls.id}`}
                         />
                       </TableCell>
@@ -688,7 +701,7 @@ export default function SettingsPage() {
                         <Input
                           type="number"
                           defaultValue={cls.unranked_coef_threshold || 0}
-                          className="w-16 mx-auto text-center h-8"
+                          className="w-16 mx-auto text-center h-8 px-1"
                           id={`unranked-${cls.id}`}
                         />
                       </TableCell>
@@ -719,16 +732,17 @@ export default function SettingsPage() {
                       <TableCell className="text-right">
                         <Button
                           size="sm"
-                          className="h-8"
+                          className="h-8 px-2"
                           onClick={() => {
                             const minAvg = parseFloat((document.getElementById(`min-avg-${cls.id}`) as HTMLInputElement).value)
                             const rattrapageAvg = parseFloat((document.getElementById(`rattrapage-avg-${cls.id}`) as HTMLInputElement).value)
+                            const repetitionAvg = parseFloat((document.getElementById(`repetition-avg-${cls.id}`) as HTMLInputElement).value)
                             const honorAvg = parseFloat((document.getElementById(`honor-avg-${cls.id}`) as HTMLInputElement).value)
                             const unranked = parseInt((document.getElementById(`unranked-${cls.id}`) as HTMLInputElement).value)
                             const nextClassInput = document.getElementById(`next-class-${cls.id}`) as HTMLInputElement
                             const nextClassId = nextClassInput ? nextClassInput.value : cls.next_class_id
                             
-                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, honorAvg, nextClassId)
+                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, honorAvg, repetitionAvg, nextClassId)
                           }}
                         >
                           <Save className="h-3 w-3 mr-1" />
