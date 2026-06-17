@@ -76,12 +76,16 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
   const isEnglish = data.section?.toLowerCase().includes("anglo")
-  const isAnnual = data.periodType === "year" || data.periodName.toLowerCase().includes("annuel") || data.periodName.toLowerCase().includes("full")
+  // FIXED DETECTION: added "complète"
+  const isAnnual = data.periodType === "year" || 
+                   data.periodName.toLowerCase().includes("annuel") || 
+                   data.periodName.toLowerCase().includes("full") ||
+                   data.periodName.toLowerCase().includes("complète")
 
   const t = {
     rep: isEnglish ? "REPUBLIC OF CAMEROON" : "RÉPUBLIQUE DU CAMEROUN",
     motto: isEnglish ? "Peace - Work - Fatherland" : "Paix - Travail - Patrie",
-    minES: isEnglish ? "MINISTRY OF SECONDARY EDUCATION" : "MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES",
+    min: isEnglish ? "MINISTRY OF SECONDARY EDUCATION" : "MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES",
     title: isAnnual ? (isEnglish ? "ANNUAL REPORT CARD" : "BULLETIN DE NOTES ANNUEL") : (isEnglish ? "PROGRESS REPORT" : "BULLETIN DE NOTES SÉQUENTIEL"),
     year: isEnglish ? "Academic Year" : "Année Scolaire",
     nameLabel: isEnglish ? "Name" : "Nom",
@@ -105,18 +109,17 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   // --- WATERMARK ---
   if (logoBase64) {
     try {
-      // Use setGState if available on the instance (requires jspdf to have the state plugin)
-      if ((pdf as any).GState) {
-        pdf.saveGraphicsState()
-        const gState = new (pdf as any).GState({ opacity: 0.05 })
-        pdf.setGState(gState)
-        pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80)
-        pdf.restoreGraphicsState()
-      } else {
-        // Fallback for watermark without opacity plugin
-        pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80)
-      }
-    } catch (e) { console.error("Watermark error:", e) }
+      pdf.saveGraphicsState()
+      // Standard way to set opacity in jsPDF
+      const gState = new (pdf as any).GState({ opacity: 0.05 })
+      pdf.setGState(gState)
+      pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 45, pageHeight / 2 - 45, 90, 90)
+      pdf.restoreGraphicsState()
+    } catch (e) { 
+      console.error("Watermark error:", e) 
+      // Fallback if GState fails
+      pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 45, pageHeight / 2 - 45, 90, 90)
+    }
   }
 
   // --- HEADER ---
@@ -139,43 +142,43 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   pdf.text("EDUCATION", pageWidth - 15, 22, { align: "right" })
 
   if (logoBase64) {
-    try { pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 12, 8, 24, 24) } catch (e) {}
+    try { pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 11, 8, 22, 22) } catch (e) {}
   }
 
-  pdf.setFontSize(11)
+  pdf.setFontSize(10.5)
   pdf.setTextColor(30, 64, 175)
-  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, 36, { align: "center" })
+  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, 35, { align: "center" })
   
-  pdf.setFontSize(7)
+  pdf.setFontSize(6.5)
   pdf.setTextColor(100)
-  pdf.text(data.schoolSettings.school_slogan || "", pageWidth / 2, 40, { align: "center" })
+  pdf.text(data.schoolSettings.school_slogan || "", pageWidth / 2, 39, { align: "center" })
 
   pdf.setDrawColor(0)
-  pdf.setLineWidth(0.5)
-  pdf.line(15, 42, pageWidth - 15, 42)
+  pdf.setLineWidth(0.4)
+  pdf.line(15, 41, pageWidth - 15, 41)
 
   // Title
-  pdf.setFontSize(13)
+  pdf.setFontSize(12)
   pdf.setTextColor(0)
   pdf.setFont("helvetica", "bold")
-  pdf.text(t.title, pageWidth / 2, 50, { align: "center" })
-  pdf.setFontSize(9)
-  pdf.text(`${t.year}: ${data.academicYear}`, pageWidth / 2, 55, { align: "center" })
+  pdf.text(t.title, pageWidth / 2, 48, { align: "center" })
+  pdf.setFontSize(8.5)
+  pdf.text(`${t.year}: ${data.academicYear}`, pageWidth / 2, 52, { align: "center" })
 
   // Student Info
-  pdf.setFontSize(8.5)
+  pdf.setFontSize(8)
   pdf.setFont("helvetica", "normal")
-  pdf.text(`${t.nameLabel}: ${data.student.lastName} ${data.student.firstName}`, 15, 63)
-  pdf.text(`${t.matLabel}: ${data.student.matricule}`, 15, 68)
-  pdf.text(`${t.classLabel}: ${data.className}`, pageWidth / 2 + 5, 63)
-  pdf.text(`${t.effLabel}: ${data.classSize}`, pageWidth / 2 + 5, 68)
+  pdf.text(`${t.nameLabel}: ${data.student.lastName} ${data.student.firstName}`, 15, 60)
+  pdf.text(`${t.matLabel}: ${data.student.matricule}`, 15, 64)
+  pdf.text(`${t.classLabel}: ${data.className}`, pageWidth / 2 + 5, 60)
+  pdf.text(`${t.effLabel}: ${data.classSize}`, pageWidth / 2 + 5, 64)
 
   // --- SUBJECTS TABLE ---
   const groups = [...new Set(data.subjects.map(s => s.group))].sort()
   const tableRows: any[] = []
 
   groups.forEach(groupName => {
-    tableRows.push([{ content: groupName, colSpan: isAnnual ? 9 : 6, styles: { fillColor: [240, 240, 240], fontStyle: "bold", fontSize: 7 } }])
+    tableRows.push([{ content: groupName, colSpan: isAnnual ? 9 : 6, styles: { fillColor: [240, 240, 240], fontStyle: "bold", fontSize: 6.5 } }])
     
     const groupSubjs = data.subjects.filter(s => s.group === groupName)
     let gW = 0, gC = 0
@@ -200,7 +203,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
 
     if (gC > 0) {
       tableRows.push([
-        { content: `${isEnglish ? "AVG" : "MOYENNE"} ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 6 } },
+        { content: `${isEnglish ? "AVG" : "MOYENNE"} ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 5.5 } },
         gC,
         { content: (gW / gC).toFixed(2), colSpan: isAnnual ? 4 : 1, styles: { halign: "center", fontStyle: "bold", textColor: [30, 64, 175] } },
         "", ""
@@ -209,7 +212,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   })
 
   autoTable(pdf, {
-    startY: 72,
+    startY: 68,
     head: [
       isAnnual 
         ? [t.subjHeader, t.teachHeader, "C", "T1", "T2", "T3", "An", t.rankHeader, t.apprHeader]
@@ -217,24 +220,24 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
     ],
     body: tableRows,
     theme: "grid",
-    headStyles: { fillColor: [30, 64, 175], fontSize: 7.5, halign: "center", cellPadding: 0.8 },
-    bodyStyles: { fontSize: 6.5, cellPadding: 0.8 },
+    headStyles: { fillColor: [30, 64, 175], fontSize: 7, halign: "center", cellPadding: 0.6 },
+    bodyStyles: { fontSize: 6, cellPadding: 0.6 },
     columnStyles: {
-      0: { cellWidth: 42 },
+      0: { cellWidth: 44 },
       1: { cellWidth: 32 },
-      2: { halign: "center", cellWidth: 7 },
+      2: { halign: "center", cellWidth: 6 },
       3: { halign: "center" },
       4: { halign: "center" },
       5: { halign: "center" },
       6: { halign: "center" },
-      7: { halign: "center", cellWidth: 12 },
+      7: { halign: "center", cellWidth: 10 },
       8: { halign: "center", cellWidth: 18 }
     }
   })
 
   // --- FOOTER SUMMARY ---
   let finalY = (pdf as any).lastAutoTable.finalY + 4
-  if (finalY > pageHeight - 55) { pdf.addPage(); finalY = 20 }
+  if (finalY > pageHeight - 50) { pdf.addPage(); finalY = 15 }
 
   // Trimester Summary Table (Left)
   if (isAnnual && data.trimesterSummaries) {
@@ -247,8 +250,8 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
       ],
       theme: "grid",
       margin: { left: 15 },
-      tableWidth: 65,
-      styles: { fontSize: 7, cellPadding: 0.8 },
+      tableWidth: 60,
+      styles: { fontSize: 6.5, cellPadding: 0.6 },
       headStyles: { fillColor: [51, 65, 85] }
     })
   }
@@ -263,18 +266,18 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
       [t.classAvg, data.classAverage.toFixed(2)],
       [t.cMax, data.classMax?.toFixed(2) || "---"],
       [t.cMin, data.classMin?.toFixed(2) || "---"],
-      [{ content: `${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, colSpan: 2, styles: { fontStyle: "bold", fillColor: [240, 240, 240], fontSize: 8 } }]
+      [{ content: `${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, colSpan: 2, styles: { fontStyle: "bold", fillColor: [240, 240, 240], fontSize: 7 } }]
     ],
     theme: "grid",
-    margin: { left: isAnnual ? 95 : 15 },
-    tableWidth: 85,
-    styles: { fontSize: 7, cellPadding: 1 },
+    margin: { left: isAnnual ? 90 : 15 },
+    tableWidth: 90,
+    styles: { fontSize: 6.5, cellPadding: 0.8 },
     headStyles: { fillColor: [51, 65, 85] }
   })
 
   // Signatures
   const sigY = pageHeight - 15
-  pdf.setFontSize(8)
+  pdf.setFontSize(7.5)
   pdf.setTextColor(0)
   pdf.setFont("helvetica", "bold")
   pdf.text(t.parent, 25, sigY)
@@ -282,17 +285,17 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   pdf.text(t.pTeacher, pageWidth - 50, sigY)
 
   // Footer Notice
-  pdf.setFontSize(6)
+  pdf.setFontSize(5.5)
   pdf.setTextColor(150)
   pdf.setFont("helvetica", "normal")
-  pdf.text("généré par Harmony by OceanTechnologie", pageWidth / 2, pageHeight - 5, { align: "center" })
+  pdf.text("généré par Harmony by OceanTechnologie", pageWidth / 2, pageHeight - 4, { align: "center" })
 }
 
 export const generateBulletinPDF = async (data: BulletinData) => {
   const pdf = new jsPDF()
   const logo = data.schoolSettings.logo_url ? await loadLogo(data.schoolSettings.logo_url) : null
   await drawBulletinPage(pdf, data, logo)
-  pdf.save(`Bulletin_${data.student.lastName}.pdf`)
+  pdf.save(`Bulletin_${data.student.lastName}_${data.student.matricule}.pdf`)
 }
 
 export const generateMassBulletinsPDF = async (dataList: BulletinData[], filename: string) => {
