@@ -132,13 +132,21 @@ export default function SettingsPage() {
     }
   }
 
-  const handleUpdateClassCriteria = async (classId: string, minAvg: number, unrankedThreshold: number) => {
+  const handleUpdateClassCriteria = async (
+    classId: string, 
+    minAvg: number, 
+    unrankedThreshold: number,
+    rattrapageAvg: number,
+    nextClassId: string | null
+  ) => {
     try {
       const { error } = await supabase
         .from("classes")
         .update({
           min_promotion_average: minAvg,
           unranked_coef_threshold: unrankedThreshold,
+          min_rattrapage_average: rattrapageAvg,
+          next_class_id: nextClassId === "none" ? null : nextClassId
         })
         .eq("id", classId)
 
@@ -146,7 +154,13 @@ export default function SettingsPage() {
       
       setClasses(classes.map(c => 
         c.id === classId 
-          ? { ...c, min_promotion_average: minAvg, unranked_coef_threshold: unrankedThreshold } 
+          ? { 
+              ...c, 
+              min_promotion_average: minAvg, 
+              unranked_coef_threshold: unrankedThreshold,
+              min_rattrapage_average: rattrapageAvg,
+              next_class_id: nextClassId === "none" ? null : nextClassId
+            } 
           : c
       ))
       toast.success("Critères mis à jour")
@@ -624,8 +638,10 @@ export default function SettingsPage() {
                   <TableRow>
                     <TableHead>Classe</TableHead>
                     <TableHead>Niveau / Section</TableHead>
-                    <TableHead className="w-48">Moyenne de passage</TableHead>
-                    <TableHead className="w-48">Seuil Coef. Non-Classé</TableHead>
+                    <TableHead className="w-32">Moyenne Passage</TableHead>
+                    <TableHead className="w-32">Moyenne Rattrapage</TableHead>
+                    <TableHead className="w-32">Seuil NC</TableHead>
+                    <TableHead className="w-48">Classe Supérieure</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -641,25 +657,62 @@ export default function SettingsPage() {
                           type="number"
                           step="0.01"
                           defaultValue={cls.min_promotion_average || 10.0}
-                          className="w-24"
+                          className="w-20"
                           id={`min-avg-${cls.id}`}
                         />
                       </TableCell>
                       <TableCell>
                         <Input
                           type="number"
+                          step="0.01"
+                          defaultValue={cls.min_rattrapage_average || 8.0}
+                          className="w-20"
+                          id={`rattrapage-avg-${cls.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
                           defaultValue={cls.unranked_coef_threshold || 0}
-                          className="w-24"
+                          className="w-20"
                           id={`unranked-${cls.id}`}
                         />
+                      </TableCell>
+                      <TableCell>
+                        <Select 
+                          defaultValue={cls.next_class_id || "none"}
+                          onValueChange={(val) => {
+                            const input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.id = `next-class-${cls.id}`;
+                            input.value = val;
+                            const existing = document.getElementById(`next-class-${cls.id}`);
+                            if (existing) existing.remove();
+                            document.body.appendChild(input);
+                          }}
+                        >
+                          <SelectTrigger id={`trigger-next-class-${cls.id}`}>
+                            <SelectValue placeholder="Aucune" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Aucune (Fin de cycle)</SelectItem>
+                            {classes.filter(c => c.id !== cls.id).map(c => (
+                              <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell className="text-right">
                         <Button
                           size="sm"
                           onClick={() => {
                             const minAvg = parseFloat((document.getElementById(`min-avg-${cls.id}`) as HTMLInputElement).value)
+                            const rattrapageAvg = parseFloat((document.getElementById(`rattrapage-avg-${cls.id}`) as HTMLInputElement).value)
                             const unranked = parseInt((document.getElementById(`unranked-${cls.id}`) as HTMLInputElement).value)
-                            handleUpdateClassCriteria(cls.id, minAvg, unranked)
+                            const nextClassInput = document.getElementById(`next-class-${cls.id}`) as HTMLInputElement
+                            const nextClassId = nextClassInput ? nextClassInput.value : cls.next_class_id
+                            
+                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, nextClassId)
                           }}
                         >
                           Sauvegarder

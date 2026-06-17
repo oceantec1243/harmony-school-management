@@ -51,7 +51,10 @@ interface Student {
     id: string
     name: string
     min_promotion_average?: number
+    min_rattrapage_average?: number
     unranked_coef_threshold?: number
+    next_class_id?: string
+    next_class?: { name: string }
     level_id: string
     level?: { id: string; name: string }
     section?: { id: string; name: string }
@@ -258,7 +261,8 @@ export default function AnnualBulletinPage() {
             student:students(
               id, first_name, last_name, matricule, gender, class_id, is_ranked,
               class:classes(
-                id, name, level_id, min_promotion_average, unranked_coef_threshold,
+                id, name, level_id, min_promotion_average, min_rattrapage_average, unranked_coef_threshold,
+                next_class:classes!next_class_id(name),
                 level:levels(id, name), 
                 section:sections(id, name)
               )
@@ -490,12 +494,19 @@ export default function AnnualBulletinPage() {
         annualSummaries.forEach(s => {
           if (typeof s.annualAverage === "number") {
             const minProm = s.student.class?.min_promotion_average || 10
-            const decision = determinePromotion(s.annualAverage, s.student.class?.name || "", s.student.class?.section?.name || "", true)
-            if (s.annualAverage < minProm) {
-              s.promotion = { promoted: false, nextClass: null, decision: `Ajourné(e) - Moyenne < ${minProm}` }
-            } else {
-              s.promotion = decision
-            }
+            const minRattrapage = s.student.class?.min_rattrapage_average || 8
+            const nextClassName = s.student.class?.next_class?.name || null
+            
+            const decision = determinePromotion(
+              s.annualAverage, 
+              s.student.class?.name || "", 
+              s.student.class?.section?.name || "", 
+              true,
+              minProm,
+              minRattrapage,
+              nextClassName
+            )
+            s.promotion = decision
           } else {
             s.promotion = { promoted: false, nextClass: null, decision: "Non Classé - Redoublement" }
           }
@@ -627,20 +638,44 @@ export default function AnnualBulletinPage() {
                     <TableCell className="text-center bg-muted/10"><div className="flex flex-col items-center"><span className="font-bold">{typeof s.trimesterAverages.t3 === "number" ? s.trimesterAverages.t3.toFixed(2) : s.trimesterAverages.t3 || "-"}</span><span className="text-[9px] text-muted-foreground">R:{s.trimesterRankings.t3}</span></div></TableCell>
                     <TableCell className="text-right font-bold">{typeof s.annualAverage === "number" ? s.annualAverage.toFixed(2) : s.annualAverage}</TableCell>
                     <TableCell><Badge className={cn(typeof s.annualAverage === "number" ? (s.annualAverage >= 16 ? "bg-purple-100 text-purple-800" : s.annualAverage >= 14 ? "bg-blue-100 text-blue-800" : s.annualAverage >= 12 ? "bg-green-100 text-green-800" : s.annualAverage >= 10 ? "bg-yellow-100 text-yellow-800" : "bg-red-100 text-red-800") : "bg-gray-100 text-gray-800")}>{typeof s.annualAverage === "number" ? getMentionLabel(s.annualAverage, language) : "Non Classé"}</Badge></TableCell>
-                    <TableCell className="text-right"><Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={() => {
-                      const pdfData: AnnualBulletinData = {
-                        student: { firstName: s.student.first_name, lastName: s.student.last_name, matricule: s.student.matricule, gender: s.student.gender },
-                        className: s.student.class?.name || "", academicYear, section: s.student.class?.section?.name || "", subjects: s.subjects,
-                        summary: {
-                          sequenceAverages: s.sequenceAverages, sequenceRankings: s.sequenceRankings,
-                          trimesterAverages: [s.trimesterAverages.t1, s.trimesterAverages.t2, s.trimesterAverages.t3].filter(x => x !== null) as (number | "NC")[],
-                          trimesterRankings: [s.trimesterRankings.t1, s.trimesterRankings.t2, s.trimesterRankings.t3].filter(x => x !== "-") as (number | "-")[],
-                          annualAverage: s.annualAverage, annualRank: s.annualRank, promotion: s.promotion?.decision || ""
-                        },
-                        schoolSettings: schoolSettings || { school_name: "HARMONY" }
-                      }
-                      generateAnnualBulletinPDF(pdfData)
-                    }}><Download className="h-4 w-4" /></Button></TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 w-8 p-0"
+                        onClick={() => {
+                          const pdfData: AnnualBulletinData = {
+                            student: {
+                              firstName: s.student.first_name,
+                              lastName: s.student.last_name,
+                              matricule: s.student.matricule,
+                              gender: s.student.gender
+                            },
+                            className: s.student.class?.name || "",
+                            academicYear: academicYear,
+                            section: s.student.class?.section?.name || "",
+                            studentCount: annualStudents.length,
+                            subjects: s.subjects.map(subj => ({
+                              ...subj,
+                              teacherName: "-" // Placeholder or fetch if available
+                            })),
+                            summary: {
+                              sequenceAverages: s.sequenceAverages,
+                              sequenceRankings: s.sequenceRankings,
+                              trimesterAverages: [s.trimesterAverages.t1, s.trimesterAverages.t2, s.trimesterAverages.t3].filter(a => a !== null) as (number | "NC")[],
+                              trimesterRankings: [s.trimesterRankings.t1, s.trimesterRankings.t2, s.trimesterRankings.t3].filter(r => r !== "-") as (number | "-")[],
+                              annualAverage: s.annualAverage,
+                              annualRank: s.annualRank,
+                              promotion: s.promotion?.decision || ""
+                            },
+                            schoolSettings: schoolSettings || { school_name: "HARMONY" }
+                          }
+                          generateAnnualBulletinPDF(pdfData)
+                        }}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}</TableBody>
               </Table></ScrollArea></CardContent></Card>

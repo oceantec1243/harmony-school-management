@@ -216,27 +216,35 @@ export function getNextClass(currentClass: string, section: string): string | nu
   return null
 }
 
+export interface PromotionResult {
+  promoted: boolean
+  nextClass: string | null
+  decision: string
+}
+
 // Determine promotion decision
 export function determinePromotion(
   average: number,
   currentClass: string,
   section: string,
   isRanked: boolean,
-): { promoted: boolean; nextClass: string | null; decision: string } {
-  // Must be ranked and have average >= 10 to be promoted
+  minPromotionAvg: number = 10,
+  minRattrapageAvg: number = 8,
+  targetClassName: string | null = null
+): PromotionResult {
+  // Must be ranked to be promoted
   if (!isRanked) {
-    return { promoted: false, nextClass: null, decision: "Non Classé - Redoublement recommandé" }
+    return { promoted: false, nextClass: null, decision: "Non Classé - Redoublement" }
   }
 
-  if (average < 10) {
-    return { promoted: false, nextClass: null, decision: "Ajourné(e) - Redoublement" }
+  if (average >= minPromotionAvg) {
+    const nextClass = targetClassName || getNextClass(currentClass, section)
+    return { promoted: true, nextClass, decision: nextClass ? `Promu(e) en ${nextClass}` : "Admis(e) - Fin de cycle" }
   }
 
-  const nextClass = getNextClass(currentClass, section)
-
-  if (!nextClass) {
-    return { promoted: true, nextClass: null, decision: "Admis(e) - Fin de cycle" }
+  if (average >= minRattrapageAvg) {
+    return { promoted: false, nextClass: null, decision: "Admis(e) au Rattrapage" }
   }
 
-  return { promoted: true, nextClass, decision: `Promu(e) en ${nextClass}` }
+  return { promoted: false, nextClass: null, decision: "Redouble la classe" }
 }
