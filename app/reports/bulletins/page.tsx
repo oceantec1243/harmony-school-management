@@ -44,7 +44,7 @@ type Subject = {
 type LocalBulletinData = {
   student: any
   period: AcademicPeriod
-  subjects: Subject[]
+  subjects: Array<Subject & { trimesters?: (number | "NC")[]; annual?: number | "NC"; rank?: string }>
   grades: Record<string, { score: number; coefficient: number }>
   subjectRanks?: Record<string, { rank: number; classSize: number }>
   sequenceGrades?: {
@@ -53,7 +53,7 @@ type LocalBulletinData = {
   }
   groupAverages: Record<string, number>
   average: number
-  rank: number
+  rank: number | string
   classSize: number
   classAverage: number
   isUnranked?: boolean
@@ -61,7 +61,12 @@ type LocalBulletinData = {
   section?: string
   seq1Average?: number
   seq2Average?: number
-  generalObservation?: string // Added for general observation
+  generalObservation?: string
+  promotion?: {
+    promoted: boolean
+    nextClass: string | null
+    decision: string
+  }
 }
 
 function getGradeColor(score: number | undefined): string {
@@ -113,7 +118,7 @@ function getSubjectAppreciation(score: number, isEnglish: boolean): string {
 }
 
 function generateGeneralObservation(
-  subjects: Subject[],
+  subjects: Array<Subject & { trimesters?: (number | "NC")[]; annual?: number | "NC" }>,
   grades: Record<string, { score: number; coefficient: number }>,
   average: number,
   attendance: any,
@@ -323,7 +328,15 @@ export default function BulletinsPage() {
       try {
         const { data: student, error: studentError } = await supabase
           .from("students")
-          .select("*, class:classes(*, level:levels(*), section:sections(*))")
+          .select(`
+            *, 
+            class:classes(
+              *, 
+              level:levels(*), 
+              section:sections(*),
+              next_class:classes!next_class_id(name)
+            )
+          `)
           .eq("id", studentId)
           .single()
 
@@ -351,6 +364,80 @@ export default function BulletinsPage() {
         }
 
         if (!period) throw new Error("Période non trouvée")
+
+        // Fetch annual summary data if needed
+        let annualSubjectsData: any[] = []
+        let promotionDecision: any = undefined
+
+        if (isAnnualPeriod) {
+          // Fetch all periods of the year
+          const { data: allYearPeriods } = await supabase
+            .from("academic_periods")
+            .select("*")
+            .eq("academic_year", academicYear)
+            .order("number", { ascending: true })
+
+          const yearSeqs = (allYearPeriods || []).filter(p => p.type === "sequence")
+          const yearTrims = (allYearPeriods || []).filter(p => p.type === "trimester")
+          
+          // Fetch all class subjects for NC calculation
+          const { data: classSubjs } = await supabase
+            .from("class_subjects")
+            .select("subject_id, coefficient")
+            .eq("class_id", student.class_id)
+          
+          const classSubjMap = new Map(classSubjs?.map(cs => [cs.subject_id, cs.coefficient]))
+
+          // Fetch all grades for this student for the year
+          const { data: yearGrades } = await supabase
+            .from("grades")
+            .select("*")
+            .eq("student_id", studentId)
+            .in("academic_period_id", (allYearPeriods || []).map(p => p.id))
+
+          // Process subjects matrix
+          annualSubjectsData = subjects.map(subj => {
+            const subjGrades = yearGrades?.filter(g => g.subject_id === subj.id) || []
+            
+            const trimAverages = yearTrims.map(trim => {
+              const trimSeqs = yearSeqs.filter(s => s.parent_id === trim.id)
+              const trimGrades = subjGrades.filter(g => trimSeqs.some(s => s.id === g.academic_period_id))
+              if (trimGrades.length === 0) return "NC"
+              return Math.round((trimGrades.reduce((sum, g) => sum + g.score, 0) / trimGrades.length) * 100) / 100
+            })
+
+            const numericTrims = trimAverages.filter(t => typeof t === 'number') as number[]
+            const annualAvg = numericTrims.length > 0 
+              ? Math.round((numericTrims.reduce((a, b) => a + b, 0) / numericTrims.length) * 100) / 100
+              : "NC"
+
+            return {
+              ...subj,
+              trimesters: trimAverages,
+              annual: annualAvg
+            }
+          })
+
+          // Calculate total average for promotion
+          const numericAnnualAvgs = annualSubjectsData
+            .filter(s => typeof s.annual === 'number')
+            .map(s => ({ score: s.annual as number, coefficient: s.coefficient }))
+          
+          const totalWeighted = numericAnnualAvgs.reduce((sum, s) => sum + s.score * s.coefficient, 0)
+          const totalCoef = numericAnnualAvgs.reduce((sum, s) => sum + s.coefficient, 0)
+          const annualTotalAverage = totalCoef > 0 ? Math.round((totalWeighted / totalCoef) * 100) / 100 : 0
+
+          // Determine promotion
+          promotionDecision = determinePromotion(
+            annualTotalAverage,
+            student.class?.name || "",
+            student.class?.section?.name || "",
+            student.is_ranked !== false,
+            student.class?.min_promotion_average || 10,
+            student.class?.min_rattrapage_average || 8,
+            student.class?.next_class?.name || null
+          )
+        }
 
         // Fetch attendance for trimester (not for annual)
         let attendanceData: any = undefined
@@ -752,7 +839,7 @@ export default function BulletinsPage() {
         return {
           student,
           period,
-          subjects,
+          subjects: isAnnualPeriod ? annualSubjectsData : subjects,
           grades,
           subjectRanks,
           sequenceGrades,
@@ -766,7 +853,8 @@ export default function BulletinsPage() {
           section: student.class?.section?.name,
           seq1Average,
           seq2Average,
-          generalObservation, // Add the generated observation
+          generalObservation,
+          promotion: promotionDecision,
         }
       } catch (error) {
         console.error("Error generating bulletin data:", error)
@@ -840,12 +928,15 @@ export default function BulletinsPage() {
           rank: subjectRank?.rank,
           classSize: subjectRank?.classSize,
           group: s.group_name,
+          trimesters: s.trimesters,
+          annual: s.annual
         }
       }),
       average: data.average,
       rank: data.isUnranked ? "NC" : data.rank,
       classSize: data.classSize,
       classAverage: data.classAverage,
+      promotion: data.promotion,
       attendance: data.attendance,
       seq1Average: data.seq1Average,
       seq2Average: data.seq2Average,

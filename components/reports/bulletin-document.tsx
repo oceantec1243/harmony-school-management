@@ -1,6 +1,8 @@
 "use client"
 
+import React from "react"
 import { getAppreciation, getDistinction } from "@/lib/calculations"
+import { cn } from "@/lib/utils"
 
 interface BulletinDocumentProps {
   bulletinData: {
@@ -14,20 +16,30 @@ interface BulletinDocumentProps {
       coefficient: number
       group_name: string
       group_order: number
+      teacher_name?: string
+      trimesters?: (number | "NC")[]
+      annual?: number | "NC"
+      rank?: string
     }>
     grades: Record<string, { score: number; coefficient: number }>
     groupAverages: Record<string, number>
     average: number
-    rank: number
+    rank: number | string
     classSize: number
     classAverage: number
+    promotion?: {
+      promoted: boolean
+      nextClass: string | null
+      decision: string
+    }
   }
   schoolSettings: any
 }
 
 export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocumentProps) {
-  const { student, period, subjects, grades, groupAverages, average, rank, classSize, classAverage } = bulletinData
+  const { student, period, subjects, grades, groupAverages, average, rank, classSize, classAverage, promotion } = bulletinData
   const classData = student.class
+  const isAnnual = period?.type === "year" || period?.name?.toLowerCase().includes("annuelle")
 
   // Group subjects by group name
   const subjectsByGroup: Record<string, typeof subjects> = {}
@@ -37,286 +49,174 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
   })
 
   const distinction = getDistinction(average)
-  const formatRank = (r: number) => (r === 1 ? "1er" : `${r}ème`)
-
-  // Calculate totals
-  const totalCoef = subjects.reduce((sum, s) => sum + s.coefficient, 0)
-  const totalPoints = Object.values(grades).reduce((sum, g) => sum + g.score * g.coefficient, 0)
+  const formatRank = (r: number | string) => {
+    if (r === "NC") return "NC"
+    const num = typeof r === "string" ? parseInt(r) : r
+    if (isNaN(num)) return r
+    return num === 1 ? "1er" : `${num}ème`
+  }
 
   return (
     <div
-      className="bg-white text-black p-8 rounded-lg relative overflow-hidden print:p-4 print:text-xs"
+      className="bg-white text-black p-8 rounded-lg relative overflow-hidden print:p-4 print:text-[10px]"
       id="bulletin-document"
     >
-      {/* Watermark */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.03] print:opacity-[0.02]">
-        <div className="text-[180px] font-black text-blue-900 rotate-[-35deg] select-none">HARMONY</div>
-      </div>
-
-      {/* Decorative Corner Elements */}
-      <div className="absolute top-0 left-0 w-32 h-32 border-l-4 border-t-4 border-blue-800 rounded-tl-3xl" />
-      <div className="absolute top-0 right-0 w-32 h-32 border-r-4 border-t-4 border-violet-700 rounded-tr-3xl" />
-      <div className="absolute bottom-0 left-0 w-32 h-32 border-l-4 border-b-4 border-violet-700 rounded-bl-3xl" />
-      <div className="absolute bottom-0 right-0 w-32 h-32 border-r-4 border-b-4 border-blue-800 rounded-br-3xl" />
-
-      {/* Header */}
-      <div className="relative z-10 mb-6">
-        <div className="flex items-start justify-between border-b-4 border-gradient-to-r from-blue-800 to-violet-700 pb-4">
-          {/* Left - School Logo/Name */}
-          <div className="flex items-center gap-4">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-800 via-blue-700 to-violet-700 flex items-center justify-center shadow-xl border-2 border-white">
-              <span className="text-white font-black text-3xl">H</span>
-            </div>
-            <div>
-              <h1 className="text-2xl font-black text-blue-900 tracking-tight">
-                {schoolSettings?.school_name || "HARMONY SCHOOL"}
-              </h1>
-              <p className="text-sm text-slate-600">{schoolSettings?.address || "Excellence en Éducation"}</p>
-              <p className="text-sm text-slate-500">
-                {schoolSettings?.phone || ""} {schoolSettings?.email ? `• ${schoolSettings.email}` : ""}
-              </p>
-            </div>
+      {/* Header (Bilingual Cameroon Style) */}
+      <div className="relative z-10 mb-6 border-b-2 border-slate-900 pb-4">
+        <div className="flex justify-between text-[10px] font-bold uppercase mb-4">
+          <div className="text-center">
+            <p>République du Cameroun</p>
+            <p>Paix - Travail - Patrie</p>
+            <p>**********</p>
+            <p>Ministère des Enseignements Secondaires</p>
           </div>
-
-          {/* Center - Title */}
-          <div className="text-center flex-1 px-4">
-            <div className="inline-block px-8 py-2 bg-gradient-to-r from-blue-800 to-violet-700 rounded-xl shadow-lg">
-              <h2 className="text-xl font-black text-white tracking-wider">BULLETIN DE NOTES</h2>
-            </div>
-            <p className="text-lg font-bold text-blue-900 mt-2">{period?.name}</p>
-            <p className="text-sm text-slate-600">Année Académique: {period?.academic_year}</p>
-          </div>
-
-          {/* Right - Student Photo */}
-          <div className="text-right">
-            <div className="w-24 h-28 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 border-2 border-slate-300 flex items-center justify-center overflow-hidden shadow-lg">
-              {student.photo ? (
-                <img src={student.photo || "/placeholder.svg"} alt="Photo" className="w-full h-full object-cover" />
-              ) : (
-                <div className="text-4xl font-bold text-slate-400">
-                  {student.first_name[0]}
-                  {student.last_name[0]}
-                </div>
-              )}
-            </div>
+          <div className="text-center">
+            <p>Republic of Cameroon</p>
+            <p>Peace - Work - Fatherland</p>
+            <p>**********</p>
+            <p>Ministry of Secondary Education</p>
           </div>
         </div>
 
-        {/* Student Info Bar */}
-        <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-3 border border-blue-200">
-            <p className="text-xs font-medium text-blue-600 uppercase">Nom complet</p>
-            <p className="text-sm font-bold text-blue-900">
-              {student.last_name} {student.first_name}
-            </p>
+        <div className="text-center">
+          <h1 className="text-xl font-black text-blue-900">
+            {schoolSettings?.school_name || "HARMONY SCHOOL"}
+          </h1>
+          <p className="text-xs text-slate-600">{schoolSettings?.school_slogan}</p>
+          <div className="inline-block mt-2 px-6 py-1 bg-slate-900 text-white rounded-md font-bold uppercase tracking-widest">
+            {isAnnual ? "BULLETIN DE NOTES ANNUEL" : "BULLETIN DE NOTES SÉQUENTIEL"}
           </div>
-          <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-xl p-3 border border-violet-200">
-            <p className="text-xs font-medium text-violet-600 uppercase">Matricule</p>
-            <p className="text-sm font-bold text-violet-900">{student.matricule}</p>
-          </div>
-          <div className="bg-gradient-to-br from-cyan-50 to-cyan-100 rounded-xl p-3 border border-cyan-200">
-            <p className="text-xs font-medium text-cyan-600 uppercase">Classe</p>
-            <p className="text-sm font-bold text-cyan-900">{classData?.name}</p>
-          </div>
-          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-xl p-3 border border-emerald-200">
-            <p className="text-xs font-medium text-emerald-600 uppercase">Effectif</p>
-            <p className="text-sm font-bold text-emerald-900">{classSize} élèves</p>
-          </div>
+          <p className="mt-2 font-bold">Année Scolaire: {period?.academic_year}</p>
+        </div>
+      </div>
+
+      {/* Student Info */}
+      <div className="grid grid-cols-2 gap-8 mb-6 text-sm">
+        <div className="space-y-1">
+          <p><span className="font-bold uppercase">Nom:</span> {student.last_name} {student.first_name}</p>
+          <p><span className="font-bold uppercase">Matricule:</span> {student.matricule}</p>
+          <p><span className="font-bold uppercase">Né(e) le:</span> {student.date_of_birth} à {student.place_of_birth || "---"}</p>
+        </div>
+        <div className="space-y-1">
+          <p><span className="font-bold uppercase">Classe:</span> {classData?.name}</p>
+          <p><span className="font-bold uppercase">Effectif:</span> {classSize}</p>
+          <p><span className="font-bold uppercase">Section:</span> {student.class?.section?.name || "---"}</p>
         </div>
       </div>
 
       {/* Grades Table */}
-      <div className="relative z-10 mb-6">
-        <table className="w-full border-collapse text-sm">
+      <div className="mb-6 overflow-x-auto">
+        <table className="w-full border-collapse border border-slate-400">
           <thead>
-            <tr className="bg-gradient-to-r from-blue-800 to-violet-700 text-white">
-              <th className="border border-slate-300 px-3 py-2 text-left font-bold rounded-tl-lg">Matière</th>
-              <th className="border border-slate-300 px-3 py-2 text-center font-bold w-16">Coef.</th>
-              <th className="border border-slate-300 px-3 py-2 text-center font-bold w-20">Note /20</th>
-              <th className="border border-slate-300 px-3 py-2 text-center font-bold w-20">Note × Coef</th>
-              <th className="border border-slate-300 px-3 py-2 text-left font-bold rounded-tr-lg">Appréciation</th>
+            <tr className="bg-slate-100">
+              <th className="border border-slate-400 p-2 text-left" rowSpan={isAnnual ? 2 : 1}>Matière</th>
+              <th className="border border-slate-400 p-2 text-center" rowSpan={isAnnual ? 2 : 1}>Coef</th>
+              {isAnnual ? (
+                <>
+                  <th className="border border-slate-400 p-1 text-center" colSpan={3}>Trimestres</th>
+                  <th className="border border-slate-400 p-2 text-center" rowSpan={2}>Annuel</th>
+                </>
+              ) : (
+                <th className="border border-slate-400 p-2 text-center">Note /20</th>
+              )}
+              <th className="border border-slate-400 p-2 text-center" rowSpan={isAnnual ? 2 : 1}>Rang</th>
+              <th className="border border-slate-400 p-2 text-left" rowSpan={isAnnual ? 2 : 1}>Appréciation</th>
             </tr>
+            {isAnnual && (
+              <tr className="bg-slate-50 text-[9px]">
+                <th className="border border-slate-400 p-1">T1</th>
+                <th className="border border-slate-400 p-1">T2</th>
+                <th className="border border-slate-400 p-1">T3</th>
+              </tr>
+            )}
           </thead>
           <tbody>
-            {Object.entries(subjectsByGroup).map(([groupName, groupSubjects], groupIndex) => (
-              <>
-                {/* Group Header */}
-                <tr key={`group-${groupIndex}`} className="bg-gradient-to-r from-slate-100 to-slate-50">
-                  <td colSpan={5} className="border border-slate-300 px-3 py-2 font-bold text-blue-900">
+            {Object.entries(subjectsByGroup).map(([groupName, groupSubjects], gIdx) => (
+              <React.Fragment key={gIdx}>
+                <tr className="bg-slate-100/50">
+                  <td colSpan={isAnnual ? 8 : 5} className="border border-slate-400 p-1 font-bold text-[10px] uppercase">
                     {groupName}
                   </td>
                 </tr>
-
-                {/* Group Subjects */}
-                {groupSubjects.map((subject, idx) => {
-                  const grade = grades[subject.id]
-                  const score = grade?.score
-                  const weightedScore = score !== undefined ? score * subject.coefficient : null
-                  const appreciation = score !== undefined ? getAppreciation(score) : "-"
-
-                  const getBgColor = () => {
-                    if (score === undefined) return "bg-slate-50"
-                    if (score >= 14) return "bg-emerald-50/50"
-                    if (score >= 10) return "bg-blue-50/50"
-                    return "bg-red-50/50"
-                  }
-
-                  const getScoreColor = () => {
-                    if (score === undefined) return "text-slate-400"
-                    if (score >= 16) return "text-emerald-600 font-bold"
-                    if (score >= 14) return "text-emerald-600"
-                    if (score >= 10) return "text-blue-600"
-                    if (score >= 8) return "text-amber-600"
-                    return "text-red-600 font-bold"
-                  }
-
+                {groupSubjects.map((s, sIdx) => {
+                  const grade = grades[s.id]
+                  const score = isAnnual ? (s.annual === "NC" ? null : s.annual) : grade?.score
                   return (
-                    <tr key={subject.id} className={`${getBgColor()} hover:bg-slate-100/50 transition-colors`}>
-                      <td className="border border-slate-300 px-3 py-2 font-medium">{subject.name}</td>
-                      <td className="border border-slate-300 px-3 py-2 text-center font-semibold text-slate-700">
-                        {subject.coefficient}
+                    <tr key={sIdx} className="hover:bg-slate-50">
+                      <td className="border border-slate-400 p-2 font-medium">
+                        {s.name}
+                        {s.teacher_name && <p className="text-[9px] text-slate-500 italic">({s.teacher_name})</p>}
                       </td>
-                      <td className={`border border-slate-300 px-3 py-2 text-center ${getScoreColor()}`}>
-                        {score !== undefined ? score.toFixed(2) : "-"}
-                      </td>
-                      <td className="border border-slate-300 px-3 py-2 text-center font-medium text-slate-700">
-                        {weightedScore !== null ? weightedScore.toFixed(2) : "-"}
-                      </td>
-                      <td className="border border-slate-300 px-3 py-2 text-sm italic text-slate-600">
-                        {appreciation}
+                      <td className="border border-slate-400 p-2 text-center">{s.coefficient}</td>
+                      {isAnnual ? (
+                        <>
+                          <td className="border border-slate-400 p-2 text-center">{typeof s.trimesters?.[0] === 'number' ? s.trimesters[0].toFixed(2) : s.trimesters?.[0] || "-"}</td>
+                          <td className="border border-slate-400 p-2 text-center">{typeof s.trimesters?.[1] === 'number' ? s.trimesters[1].toFixed(2) : s.trimesters?.[1] || "-"}</td>
+                          <td className="border border-slate-400 p-2 text-center">{typeof s.trimesters?.[2] === 'number' ? s.trimesters[2].toFixed(2) : s.trimesters?.[2] || "-"}</td>
+                          <td className="border border-slate-400 p-2 text-center font-bold">{typeof s.annual === 'number' ? s.annual.toFixed(2) : s.annual || "-"}</td>
+                        </>
+                      ) : (
+                        <td className={cn("border border-slate-400 p-2 text-center font-bold", (score ?? 0) < 10 && "text-red-600")}>
+                          {score !== undefined && score !== null ? Number(score).toFixed(2) : "-"}
+                        </td>
+                      )}
+                      <td className="border border-slate-400 p-2 text-center">{s.rank || "-"}</td>
+                      <td className="border border-slate-400 p-2 text-[10px]">
+                        {score !== null && score !== undefined ? getAppreciation(Number(score), false) : "-"}
                       </td>
                     </tr>
                   )
                 })}
-
-                {/* Group Average */}
-                <tr className="bg-gradient-to-r from-blue-100 to-violet-100 font-semibold">
-                  <td colSpan={2} className="border border-slate-300 px-3 py-2 text-right text-blue-900">
-                    Moyenne {groupName}:
-                  </td>
-                  <td className="border border-slate-300 px-3 py-2 text-center text-blue-900 font-bold">
-                    {groupAverages[groupName]?.toFixed(2) || "-"}
-                  </td>
-                  <td colSpan={2} className="border border-slate-300 px-3 py-2"></td>
-                </tr>
-              </>
+              </React.Fragment>
             ))}
           </tbody>
-
-          {/* Footer with Totals */}
-          <tfoot>
-            <tr className="bg-gradient-to-r from-blue-800 to-violet-700 text-white font-bold">
-              <td className="border border-slate-300 px-3 py-3 rounded-bl-lg">TOTAUX</td>
-              <td className="border border-slate-300 px-3 py-3 text-center">{totalCoef}</td>
-              <td className="border border-slate-300 px-3 py-3 text-center">-</td>
-              <td className="border border-slate-300 px-3 py-3 text-center">{totalPoints.toFixed(2)}</td>
-              <td className="border border-slate-300 px-3 py-3 rounded-br-lg"></td>
-            </tr>
-          </tfoot>
         </table>
       </div>
 
-      {/* Results Summary */}
-      <div className="relative z-10 mb-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {/* Average */}
-          <div className="bg-gradient-to-br from-blue-800 to-blue-900 rounded-2xl p-4 text-white shadow-xl">
-            <p className="text-xs font-medium text-blue-200 uppercase tracking-wide">Moyenne Générale</p>
-            <p className="text-4xl font-black mt-1">{average.toFixed(2)}</p>
-            <p className="text-sm text-blue-200 mt-1">/20</p>
+      {/* Summary Footer */}
+      <div className="grid grid-cols-2 gap-10">
+        <div className="border border-slate-400 p-4 rounded-lg space-y-2">
+          <div className="flex justify-between border-b border-slate-200 pb-1">
+            <span className="font-bold">Moyenne Générale:</span>
+            <span className="text-lg font-black text-blue-900">{average.toFixed(2)}/20</span>
           </div>
-
-          {/* Rank */}
-          <div className="bg-gradient-to-br from-violet-700 to-violet-800 rounded-2xl p-4 text-white shadow-xl">
-            <p className="text-xs font-medium text-violet-200 uppercase tracking-wide">Rang</p>
-            <p className="text-4xl font-black mt-1">{formatRank(rank)}</p>
-            <p className="text-sm text-violet-200 mt-1">sur {classSize}</p>
+          <div className="flex justify-between border-b border-slate-200 pb-1">
+            <span className="font-bold">Rang:</span>
+            <span>{formatRank(rank)} sur {classSize}</span>
           </div>
-
-          {/* Class Average */}
-          <div className="bg-gradient-to-br from-cyan-600 to-cyan-700 rounded-2xl p-4 text-white shadow-xl">
-            <p className="text-xs font-medium text-cyan-200 uppercase tracking-wide">Moy. Classe</p>
-            <p className="text-4xl font-black mt-1">{classAverage.toFixed(2)}</p>
-            <p className="text-sm text-cyan-200 mt-1">/20</p>
+          <div className="flex justify-between border-b border-slate-200 pb-1">
+            <span className="font-bold">Moyenne Classe:</span>
+            <span>{classAverage.toFixed(2)}/20</span>
           </div>
+          <div className="pt-2">
+            <p className="font-bold uppercase text-xs text-slate-500">Décision du Conseil:</p>
+            <p className="text-sm font-bold text-slate-900">
+              {isAnnual && promotion ? promotion.decision : distinction}
+            </p>
+          </div>
+        </div>
 
-          {/* Distinction */}
-          <div
-            className={`rounded-2xl p-4 text-white shadow-xl ${
-              average >= 16
-                ? "bg-gradient-to-br from-amber-500 to-amber-600"
-                : average >= 14
-                  ? "bg-gradient-to-br from-emerald-600 to-emerald-700"
-                  : average >= 12
-                    ? "bg-gradient-to-br from-blue-600 to-blue-700"
-                    : average >= 10
-                      ? "bg-gradient-to-br from-slate-600 to-slate-700"
-                      : "bg-gradient-to-br from-red-600 to-red-700"
-            }`}
-          >
-            <p className="text-xs font-medium uppercase tracking-wide opacity-80">Mention</p>
-            <p className="text-lg font-bold mt-1 leading-tight">{distinction}</p>
+        <div className="space-y-8 pt-4">
+          <div className="grid grid-cols-3 gap-2 text-[10px] font-bold text-center">
+            <div className="space-y-12">
+              <p>Le Parent</p>
+              <div className="border-t border-slate-400 pt-1" />
+            </div>
+            <div className="space-y-12">
+              <p>Le Principal</p>
+              <div className="border-t border-slate-400 pt-1" />
+            </div>
+            <div className="space-y-12">
+              <p>Le Professeur Principal</p>
+              <div className="border-t border-slate-400 pt-1" />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Observations & Decision */}
-      <div className="relative z-10 mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="border-2 border-slate-200 rounded-xl p-4">
-          <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-blue-600"></span>
-            Observation du Conseil de Classe
-          </h3>
-          <div className="min-h-[60px] text-sm text-slate-600 italic">
-            {average >= 16
-              ? "Excellent travail. Continuez ainsi !"
-              : average >= 14
-                ? "Très bon trimestre. Élève sérieux et appliqué."
-                : average >= 12
-                  ? "Bon travail. Des efforts supplémentaires permettront d'atteindre l'excellence."
-                  : average >= 10
-                    ? "Résultats acceptables. Plus de rigueur est nécessaire."
-                    : "Résultats insuffisants. Un travail plus soutenu est indispensable."}
-          </div>
-        </div>
-
-        <div className="border-2 border-slate-200 rounded-xl p-4">
-          <h3 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-violet-600"></span>
-            Décision du Conseil
-          </h3>
-          <div className="min-h-[60px] text-sm text-slate-600 italic">{distinction}</div>
-        </div>
-      </div>
-
-      {/* Signatures */}
-      <div className="relative z-10 grid grid-cols-3 gap-6 pt-4 border-t-2 border-slate-200">
-        <div className="text-center">
-          <p className="text-xs text-slate-500 uppercase tracking-wide mb-12">Le Directeur</p>
-          <div className="border-t-2 border-slate-300 pt-2">
-            <p className="text-sm font-medium text-slate-700">Signature & Cachet</p>
-          </div>
-        </div>
-        <div className="text-center">
-          <p className="text-xs text-slate-500 uppercase tracking-wide mb-12">Le Professeur Principal</p>
-          <div className="border-t-2 border-slate-300 pt-2">
-            <p className="text-sm font-medium text-slate-700">Signature</p>
-          </div>
-        </div>
-        <div className="text-center">
-          <p className="text-xs text-slate-500 uppercase tracking-wide mb-12">Le Parent / Tuteur</p>
-          <div className="border-t-2 border-slate-300 pt-2">
-            <p className="text-sm font-medium text-slate-700">Signature</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="relative z-10 mt-6 pt-4 border-t border-slate-200 text-center">
-        <p className="text-xs text-slate-400">Document généré par HARMONY - Système de Gestion Scolaire d'Excellence</p>
-        <p className="text-xs text-slate-400 mt-1">
-          Généré le {new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
-        </p>
+      {/* Bottom Legal Notice */}
+      <div className="absolute bottom-2 left-0 w-full text-center text-[8px] text-slate-400">
+        Bulletin généré par HARMONY School Management - © OceanTechnologie 2026
       </div>
     </div>
   )
