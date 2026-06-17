@@ -167,6 +167,13 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
                     </tr>
                   )
                 })}
+                {groupAverages[groupName] !== undefined && (
+                  <tr className="bg-slate-50 font-bold italic">
+                    <td colSpan={isAnnual ? 5 : 2} className="border border-slate-400 p-1 text-right text-[10px]">Moyenne {groupName}:</td>
+                    <td className="border border-slate-400 p-1 text-center text-[11px] text-blue-800">{groupAverages[groupName].toFixed(2)}</td>
+                    <td colSpan={2} className="border border-slate-400 p-1"></td>
+                  </tr>
+                )}
               </React.Fragment>
             ))}
           </tbody>
@@ -175,24 +182,54 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
 
       {/* Summary Footer */}
       <div className="grid grid-cols-2 gap-10">
-        <div className="border border-slate-400 p-4 rounded-lg space-y-2">
-          <div className="flex justify-between border-b border-slate-200 pb-1">
-            <span className="font-bold">Moyenne Générale:</span>
-            <span className="text-lg font-black text-blue-900">{average.toFixed(2)}/20</span>
-          </div>
-          <div className="flex justify-between border-b border-slate-200 pb-1">
-            <span className="font-bold">Rang:</span>
-            <span>{formatRank(rank)} sur {classSize}</span>
-          </div>
-          <div className="flex justify-between border-b border-slate-200 pb-1">
-            <span className="font-bold">Moyenne Classe:</span>
-            <span>{classAverage.toFixed(2)}/20</span>
-          </div>
-          <div className="pt-2">
-            <p className="font-bold uppercase text-xs text-slate-500">Décision du Conseil:</p>
-            <p className="text-sm font-bold text-slate-900">
-              {isAnnual && promotion ? promotion.decision : distinction}
-            </p>
+        <div className="space-y-4">
+          {isAnnual && bulletinData.trimesterSummaries && (
+            <div className="border border-slate-400 rounded-lg overflow-hidden">
+              <table className="w-full text-[10px] border-collapse">
+                <thead className="bg-slate-100">
+                  <tr>
+                    <th className="border border-slate-400 p-1">PÉRIODE</th>
+                    <th className="border border-slate-400 p-1">MOYENNE</th>
+                    <th className="border border-slate-400 p-1">RANG</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulletinData.trimesterSummaries.map((ts, idx) => (
+                    <tr key={idx}>
+                      <td className="border border-slate-400 p-1 font-bold">TRIMESTRE {idx + 1}</td>
+                      <td className="border border-slate-400 p-1 text-center">{typeof ts.average === 'number' ? ts.average.toFixed(2) : ts.average}</td>
+                      <td className="border border-slate-400 p-1 text-center">{ts.rank}</td>
+                    </tr>
+                  ))}
+                  <tr className="bg-blue-50 font-black">
+                    <td className="border border-slate-400 p-1 text-blue-900 uppercase">ANNUEL</td>
+                    <td className="border border-slate-400 p-1 text-center text-blue-900 text-sm">{average.toFixed(2)}</td>
+                    <td className="border border-slate-400 p-1 text-center text-blue-900 text-sm">{rank}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="border border-slate-400 p-4 rounded-lg space-y-2">
+            <div className="flex justify-between border-b border-slate-200 pb-1">
+              <span className="font-bold">Moyenne Générale:</span>
+              <span className="text-lg font-black text-blue-900">{average.toFixed(2)}/20</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 pb-1">
+              <span className="font-bold">Rang:</span>
+              <span>{formatRank(rank)} sur {classSize}</span>
+            </div>
+            <div className="flex justify-between border-b border-slate-200 pb-1">
+              <span className="font-bold">Moyenne Classe:</span>
+              <span>{classAverage.toFixed(2)}/20</span>
+            </div>
+            <div className="pt-2">
+              <p className="font-bold uppercase text-xs text-slate-500">Décision du Conseil:</p>
+              <p className="text-sm font-bold text-slate-900">
+                {isAnnual && promotion ? promotion.decision : distinction}
+              </p>
+            </div>
           </div>
         </div>
 

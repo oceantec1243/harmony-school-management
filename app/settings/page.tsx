@@ -137,6 +137,7 @@ export default function SettingsPage() {
     minAvg: number, 
     unrankedThreshold: number,
     rattrapageAvg: number,
+    honorRollAvg: number,
     nextClassId: string | null
   ) => {
     try {
@@ -146,6 +147,7 @@ export default function SettingsPage() {
           min_promotion_average: minAvg,
           unranked_coef_threshold: unrankedThreshold,
           min_rattrapage_average: rattrapageAvg,
+          min_honor_roll_average: honorRollAvg,
           next_class_id: nextClassId === "none" ? null : nextClassId
         })
         .eq("id", classId)
@@ -159,6 +161,7 @@ export default function SettingsPage() {
               min_promotion_average: minAvg, 
               unranked_coef_threshold: unrankedThreshold,
               min_rattrapage_average: rattrapageAvg,
+              min_honor_roll_average: honorRollAvg,
               next_class_id: nextClassId === "none" ? null : nextClassId
             } 
           : c
@@ -637,27 +640,29 @@ export default function SettingsPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Classe</TableHead>
-                    <TableHead>Niveau / Section</TableHead>
-                    <TableHead className="w-32">Moyenne Passage</TableHead>
-                    <TableHead className="w-32">Moyenne Rattrapage</TableHead>
-                    <TableHead className="w-32">Seuil NC</TableHead>
-                    <TableHead className="w-48">Classe Supérieure</TableHead>
+                    <TableHead className="w-24 text-center">Passage</TableHead>
+                    <TableHead className="w-24 text-center">Rattrapage</TableHead>
+                    <TableHead className="w-24 text-center">T. Honneur</TableHead>
+                    <TableHead className="w-24 text-center">Seuil NC</TableHead>
+                    <TableHead className="w-40">Classe Sup.</TableHead>
                     <TableHead className="text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {classes.map((cls) => (
                     <TableRow key={cls.id}>
-                      <TableCell className="font-medium">{cls.name}</TableCell>
-                      <TableCell>
-                        {cls.level?.name} / {cls.section?.name}
+                      <TableCell className="font-medium">
+                        <div>{cls.name}</div>
+                        <div className="text-[10px] text-muted-foreground uppercase">
+                          {cls.level?.name} / {cls.section?.name}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Input
                           type="number"
                           step="0.01"
                           defaultValue={cls.min_promotion_average || 10.0}
-                          className="w-20"
+                          className="w-16 mx-auto text-center h-8"
                           id={`min-avg-${cls.id}`}
                         />
                       </TableCell>
@@ -666,15 +671,24 @@ export default function SettingsPage() {
                           type="number"
                           step="0.01"
                           defaultValue={cls.min_rattrapage_average || 8.0}
-                          className="w-20"
+                          className="w-16 mx-auto text-center h-8"
                           id={`rattrapage-avg-${cls.id}`}
                         />
                       </TableCell>
                       <TableCell>
                         <Input
                           type="number"
+                          step="0.01"
+                          defaultValue={cls.min_honor_roll_average || 12.0}
+                          className="w-16 mx-auto text-center h-8"
+                          id={`honor-avg-${cls.id}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Input
+                          type="number"
                           defaultValue={cls.unranked_coef_threshold || 0}
-                          className="w-20"
+                          className="w-16 mx-auto text-center h-8"
                           id={`unranked-${cls.id}`}
                         />
                       </TableCell>
@@ -691,11 +705,11 @@ export default function SettingsPage() {
                             document.body.appendChild(input);
                           }}
                         >
-                          <SelectTrigger id={`trigger-next-class-${cls.id}`}>
+                          <SelectTrigger className="h-8 text-xs">
                             <SelectValue placeholder="Aucune" />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="none">Aucune (Fin de cycle)</SelectItem>
+                            <SelectItem value="none">Aucune</SelectItem>
                             {classes.filter(c => c.id !== cls.id).map(c => (
                               <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                             ))}
@@ -705,17 +719,20 @@ export default function SettingsPage() {
                       <TableCell className="text-right">
                         <Button
                           size="sm"
+                          className="h-8"
                           onClick={() => {
                             const minAvg = parseFloat((document.getElementById(`min-avg-${cls.id}`) as HTMLInputElement).value)
                             const rattrapageAvg = parseFloat((document.getElementById(`rattrapage-avg-${cls.id}`) as HTMLInputElement).value)
+                            const honorAvg = parseFloat((document.getElementById(`honor-avg-${cls.id}`) as HTMLInputElement).value)
                             const unranked = parseInt((document.getElementById(`unranked-${cls.id}`) as HTMLInputElement).value)
                             const nextClassInput = document.getElementById(`next-class-${cls.id}`) as HTMLInputElement
                             const nextClassId = nextClassInput ? nextClassInput.value : cls.next_class_id
                             
-                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, nextClassId)
+                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, honorAvg, nextClassId)
                           }}
                         >
-                          Sauvegarder
+                          <Save className="h-3 w-3 mr-1" />
+                          OK
                         </Button>
                       </TableCell>
                     </TableRow>
