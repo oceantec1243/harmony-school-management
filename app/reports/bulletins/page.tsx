@@ -15,6 +15,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import { determinePromotion } from "@/lib/calculations"
 import { generateBulletinPDF, generateMassBulletinsPDF, type BulletinData } from "@/lib/services/bulletin-pdf-generator"
+import { BulletinDocument } from "@/components/reports/bulletin-document"
 
 type Student = {
   id: string
@@ -316,6 +317,34 @@ export default function BulletinsPage() {
     setGenerating(false)
   }
 
+  const handleMassGeneration = async () => {
+    if (!selectedClass || !selectedPeriod || students.length === 0) {
+      toast.error("Sélectionnez une classe et une période")
+      return
+    }
+    setMassGenerating(true)
+    try {
+      const allData: BulletinData[] = []
+      for (const s of students) {
+        const data = await generateBulletinDataForStudent(s.id)
+        if (data) {
+          allData.push({
+            student: { firstName: data.student.first_name, lastName: data.student.last_name, matricule: data.student.matricule, isRanked: !data.isUnranked },
+            className: data.student.class?.name || "", periodName: data.period.name, periodType: data.period.type as any,
+            academicYear: data.period.academic_year, section: data.section || "",
+            subjects: data.subjects.map(subj => ({ name: subj.name, teacher: subj.teacher_name, coefficient: subj.coefficient, average: typeof subj.annual === 'number' ? subj.annual : data.grades[subj.id]?.score, trimesters: subj.trimesters, annual: subj.annual, group: subj.group_name })),
+            average: data.average, rank: data.rank, classSize: data.classSize, classAverage: data.classAverage, promotion: data.promotion,
+            schoolSettings: { school_name: schoolSettings?.school_name, school_slogan: schoolSettings?.school_slogan, address: schoolSettings?.address, phone: schoolSettings?.phone, logo_url: schoolSettings?.logo_url }
+          })
+        }
+      }
+      const className = classes.find(c => c.id === selectedClass)?.name || ""
+      await generateMassBulletinsPDF(allData, `Bulletins_${className}`)
+      toast.success(`${allData.length} bulletins générés`)
+    } catch (e) { console.error(e); toast.error("Erreur lors de la génération") }
+    setMassGenerating(false)
+  }
+
   const handleDownloadPDF = async () => {
     if (!bulletinData) return
     setDownloading(true)
@@ -360,6 +389,15 @@ export default function BulletinsPage() {
             </div>
           </div>
         </CardContent></Card>
+
+        {selectedClass && selectedPeriod && (
+          <div className="flex justify-end">
+            <Button onClick={handleMassGeneration} disabled={massGenerating || students.length === 0}>
+              {massGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Users className="mr-2 h-4 w-4" />}
+              Générer Tous ({students.length})
+            </Button>
+          </div>
+        )}
 
         <div className="space-y-2">
           {filteredStudents.map(s => (
