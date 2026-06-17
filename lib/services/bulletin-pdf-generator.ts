@@ -42,14 +42,6 @@ export interface BulletinData {
   }
   seq1Average?: number
   seq2Average?: number
-  seq1Rank?: number
-  seq2Rank?: number
-  // Historical data for progress graph
-  history?: {
-    periodName: string
-    average: number
-    classAverage?: number
-  }[]
   attendance?: {
     total_hours: number
     justified_hours: number
@@ -65,23 +57,12 @@ export interface BulletinData {
   }
 }
 
-// Format number safely
 const safeNum = (val: number | string | undefined | null): string => {
   if (val === undefined || val === null) return "-"
   if (typeof val === 'string') return val
   return val.toFixed(2)
 }
 
-// Get color based on score
-const getGradeColor = (score: number | undefined | null): [number, number, number] => {
-  if (score === undefined || score === null) return [100, 100, 100]
-  if (score < 10) return [220, 38, 38] // Red
-  if (score < 12) return [234, 179, 8] // Yellow
-  if (score < 15) return [37, 99, 235] // Blue
-  return [22, 163, 74] // Green
-}
-
-// Get appreciation
 const getAppreciation = (score: number | string | undefined | null, isEnglish: boolean): string => {
   if (score === undefined || score === null || score === "NC") return "-"
   const s = typeof score === 'string' ? parseFloat(score) : score
@@ -104,7 +85,6 @@ const getAppreciation = (score: number | string | undefined | null, isEnglish: b
   }
 }
 
-// Get decision based on average
 const getDecision = (average: number, isEnglish: boolean): string => {
   if (average >= 16) return isEnglish ? "Honor Roll" : "Tableau d'Honneur"
   if (average >= 14) return isEnglish ? "Congratulations" : "Félicitations"
@@ -114,38 +94,10 @@ const getDecision = (average: number, isEnglish: boolean): string => {
   return isEnglish ? "Warning" : "Avertissement"
 }
 
-// Generate observation
-const generateObservation = (data: BulletinData, isEnglish: boolean): string => {
-  const avg = data.average
-  const isAnnual = data.periodType === "year" || data.periodName.toLowerCase().includes("annuelle")
-  
-  if (isAnnual && data.promotion) return data.promotion.decision
-
-  const weakSubjects = data.subjects.filter((s) => s.average !== undefined && s.average < 10).map((s) => s.name)
-  const strongSubjects = data.subjects.filter((s) => s.average !== undefined && s.average >= 16).map((s) => s.name)
-  
-  let obs = ""
-  if (isEnglish) {
-    if (avg >= 16) obs = "Excellent results. Keep up the outstanding work."
-    else if (avg >= 14) obs = "Very good performance. Continue your efforts."
-    else if (avg >= 12) obs = "Good results. Keep working hard."
-    else if (avg >= 10) obs = "Average results. More effort needed."
-    else obs = "Insufficient results. Urgent improvement required."
-  } else {
-    if (avg >= 16) obs = "Excellents résultats. Continuez ainsi."
-    else if (avg >= 14) obs = "Très bon travail. Poursuivez vos efforts."
-    else if (avg >= 12) obs = "Bons résultats. Continuez à travailler."
-    else if (avg >= 10) obs = "Résultats moyens. Plus d'efforts nécessaires."
-    else obs = "Résultats insuffisants. Amélioration urgente requise."
-  }
-  return obs
-}
-
-// Draw bulletin page
 const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | null) => {
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
-  const margin = 8
+  const margin = 10
   const contentWidth = pageWidth - 2 * margin
 
   const isEnglish = data.section?.toLowerCase().includes("anglo")
@@ -154,158 +106,146 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData, logoBase64: string | n
 
   let y = margin
 
-  // Official Header
-  const headerHeight = 35
-  pdf.setDrawColor(0, 0, 0)
-  pdf.setLineWidth(0.4)
-  pdf.rect(margin, y, contentWidth, headerHeight, "S")
-
-  // Left - French
+  // Official Header (Cameroon Style)
   pdf.setFontSize(8)
   pdf.setFont("helvetica", "bold")
-  pdf.text("RÉPUBLIQUE DU CAMEROUN", margin + 4, y + 6)
-  pdf.setFontSize(7)
-  pdf.text("Paix - Travail - Patrie", margin + 10, y + 10)
-  pdf.text("**********", margin + 15, y + 14)
-  pdf.text("MINISTÈRE DES ENSEIGNEMENTS", margin + 4, y + 18)
-  pdf.text("SECONDAIRES", margin + 12, y + 22)
+  pdf.text("RÉPUBLIQUE DU CAMEROUN", margin, y + 5)
+  pdf.text("Paix - Travail - Patrie", margin + 5, y + 9)
+  pdf.text("**********", margin + 15, y + 13)
+  pdf.text("MINISTÈRE DES ENSEIGNEMENTS", margin, y + 17)
+  pdf.text("SECONDAIRES", margin + 10, y + 21)
 
-  // Center - Logo
+  pdf.text("REPUBLIC OF CAMEROON", pageWidth - margin, y + 5, { align: "right" })
+  pdf.text("Peace - Work - Fatherland", pageWidth - margin - 5, y + 9, { align: "right" })
+  pdf.text("**********", pageWidth - margin - 15, y + 13, { align: "right" })
+  pdf.text("MINISTRY OF SECONDARY", pageWidth - margin, y + 17, { align: "right" })
+  pdf.text("EDUCATION", pageWidth - margin - 10, y + 21, { align: "right" })
+
   if (logoBase64) {
-    pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 12, y + 5, 24, 24)
-  } else {
-    pdf.setFontSize(14)
-    pdf.text("H", pageWidth / 2, y + 18, { align: "center" })
+    try { pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 12, y + 2, 24, 24) } catch (e) {}
   }
 
-  // Right - English
-  pdf.setFontSize(8)
-  pdf.text("REPUBLIC OF CAMEROON", pageWidth - margin - 4, y + 6, { align: "right" })
-  pdf.setFontSize(7)
-  pdf.text("Peace - Work - Fatherland", pageWidth - margin - 10, y + 10, { align: "right" })
-  pdf.text("**********", pageWidth - margin - 15, y + 14, { align: "right" })
-  pdf.text("MINISTRY OF SECONDARY", pageWidth - margin - 4, y + 18, { align: "right" })
-  pdf.text("EDUCATION", pageWidth - margin - 10, y + 22, { align: "right" })
-
-  y += headerHeight + 5
-
-  // Title
-  pdf.setFillColor(30, 64, 175)
-  pdf.rect(margin + 20, y, contentWidth - 40, 8, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(10)
-  const title = isEnglish
-    ? `${isAnnual ? "ANNUAL REPORT CARD" : isTrimester ? "TRIMESTER REPORT CARD" : "SEQUENCE REPORT CARD"}`
-    : `${isAnnual ? "BULLETIN DE NOTES ANNUEL" : isTrimester ? "BULLETIN DE NOTES TRIMESTRIEL" : "BULLETIN DE NOTES SÉQUENTIEL"}`
-  pdf.text(title, pageWidth / 2, y + 5.5, { align: "center" })
-  y += 12
-
-  pdf.setTextColor(0, 0, 0)
-  pdf.setFontSize(8)
-  pdf.text(`${isEnglish ? "Academic Year" : "Année Scolaire"}: ${data.academicYear}`, pageWidth / 2, y, { align: "center" })
-  y += 6
-
-  // Student Info
-  pdf.setFillColor(245, 247, 250)
-  pdf.rect(margin, y, contentWidth, 15, "F")
-  pdf.setDrawColor(200, 200, 200)
-  pdf.setLineWidth(0.2)
-  pdf.rect(margin, y, contentWidth, 15, "S")
-
-  pdf.setFont("helvetica", "bold")
-  pdf.text(`${isEnglish ? "Name" : "Nom"}: ${data.student.lastName} ${data.student.firstName}`, margin + 5, y + 6)
-  pdf.text(`${isEnglish ? "Matricule" : "Matricule"}: ${data.student.matricule}`, margin + 5, y + 11)
-  pdf.text(`${isEnglish ? "Class" : "Classe"}: ${data.className}`, pageWidth / 2 + 10, y + 6)
-  pdf.text(`${isEnglish ? "Enrollment" : "Effectif"}: ${data.classSize}`, pageWidth / 2 + 10, y + 11)
-
-  y += 20
-
-  // Grades Table
-  const colWidths = isAnnual 
-    ? [40, 26, 7, 10, 10, 10, 15, 12, 25, 25]
-    : isTrimester 
-      ? [44, 30, 9, 13, 13, 13, 18, 28, 26] 
-      : [54, 36, 10, 18, 22, 30, 24]
-
-  const trimNum = data.periodNumber || 1
-  const seqLabel1 = `S${(trimNum - 1) * 2 + 1}`
-  const seqLabel2 = `S${(trimNum - 1) * 2 + 2}`
-
-  const headers = isAnnual
-    ? [isEnglish ? "Subject" : "Matière", isEnglish ? "Teacher" : "Enseignant", "C", "T1", "T2", "T3", isEnglish ? "Annual" : "Annuel", isEnglish ? "Rank" : "Rang", "Apprec.", "Obs."]
-    : isTrimester
-      ? [isEnglish ? "Subject" : "Matière", isEnglish ? "Teacher" : "Enseignant", "C", seqLabel1, seqLabel2, isEnglish ? "Avg" : "Moy", isEnglish ? "Rank" : "Rang", "Apprec.", "Obs."]
-      : [isEnglish ? "Subject" : "Matière", isEnglish ? "Teacher" : "Enseignant", "C", isEnglish ? "Grade" : "Note", isEnglish ? "Rank" : "Rang", "Apprec.", "Obs."]
-
-  pdf.setFillColor(30, 64, 175)
-  pdf.rect(margin, y, contentWidth, 6, "F")
-  pdf.setTextColor(255, 255, 255)
-  pdf.setFontSize(7)
+  y += 28
+  pdf.setFontSize(12)
+  pdf.setTextColor(30, 64, 175)
+  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, y, { align: "center" })
   
-  let currentX = margin
-  headers.forEach((h, i) => {
-    pdf.text(h, currentX + colWidths[i] / 2, y + 4.5, { align: "center" })
-    currentX += colWidths[i]
-  })
-  y += 6
-
+  y += 5
+  pdf.setFontSize(10)
   pdf.setTextColor(0, 0, 0)
-  data.subjects.forEach((subj) => {
-    let rowX = margin
-    pdf.setFont("helvetica", "normal")
-    pdf.text(subj.name.substring(0, 20), rowX + 2, y + 4.5)
-    rowX += colWidths[0]
-    pdf.text((subj.teacher || "-").substring(0, 12), rowX + 2, y + 4.5)
-    rowX += colWidths[1]
-    pdf.text(String(subj.coefficient), rowX + colWidths[2] / 2, y + 4.5, { align: "center" })
-    rowX += colWidths[2]
+  const title = isAnnual ? "BULLETIN DE NOTES ANNUEL" : isTrimester ? "BULLETIN DE NOTES TRIMESTRIEL" : "BULLETIN DE NOTES SÉQUENTIEL"
+  pdf.text(title, pageWidth / 2, y, { align: "center" })
+  
+  y += 5
+  pdf.text(`Année Scolaire: ${data.academicYear}`, pageWidth / 2, y, { align: "center" })
+
+  y += 10
+  pdf.setFontSize(9)
+  pdf.text(`Nom: ${data.student.lastName} ${data.student.firstName}`, margin, y)
+  pdf.text(`Classe: ${data.className}`, pageWidth / 2 + 10, y)
+  
+  y += 5
+  pdf.text(`Matricule: ${data.student.matricule}`, margin, y)
+  pdf.text(`Effectif: ${data.classSize}`, pageWidth / 2 + 10, y)
+
+  y += 10
+  // Table
+  const colWidths = isAnnual ? [40, 25, 6, 12, 12, 12, 15, 12, 28, 25] : [55, 35, 8, 18, 18, 28, 25]
+  const headers = isAnnual 
+    ? ["Matière", "Enseignant", "C", "T1", "T2", "T3", "Annuel", "Rang", "Appréciation", "Observation"]
+    : ["Matière", "Enseignant", "C", "Note", "Rang", "Appréciation", "Observation"]
+
+  pdf.setFillColor(30, 64, 175)
+  pdf.rect(margin, y, contentWidth, 7, "F")
+  pdf.setTextColor(255, 255, 255)
+  pdf.setFontSize(7.5)
+  
+  let curX = margin
+  headers.forEach((h, i) => {
+    pdf.text(h, curX + 2, y + 5)
+    curX += colWidths[i] || 0
+  })
+
+  y += 7
+  pdf.setTextColor(0, 0, 0)
+  pdf.setFont("helvetica", "normal")
+  data.subjects.forEach(s => {
+    if (y > pageHeight - 35) { pdf.addPage(); y = 20 }
+    let rx = margin
+    pdf.setFontSize(7)
+    pdf.text(s.name.substring(0, 25), rx + 2, y + 4.5)
+    rx += colWidths[0]
+    pdf.setFontSize(6)
+    pdf.text((s.teacher || "-").substring(0, 20), rx + 2, y + 4.5)
+    rx += colWidths[1]
+    pdf.setFontSize(7)
+    pdf.text(String(s.coefficient), rx + 3, y + 4.5)
+    rx += colWidths[2]
 
     if (isAnnual) {
-      pdf.text(safeNum(subj.trimesters?.[0]), rowX + colWidths[3] / 2, y + 4.5, { align: "center" })
-      rowX += colWidths[3]
-      pdf.text(safeNum(subj.trimesters?.[1]), rowX + colWidths[4] / 2, y + 4.5, { align: "center" })
-      rowX += colWidths[4]
-      pdf.text(safeNum(subj.trimesters?.[2]), rowX + colWidths[5] / 2, y + 4.5, { align: "center" })
-      rowX += colWidths[5]
+      pdf.text(safeNum(s.trimesters?.[0]), rx + 2, y + 4.5)
+      rx += colWidths[3]
+      pdf.text(safeNum(s.trimesters?.[1]), rx + 2, y + 4.5)
+      rx += colWidths[4]
+      pdf.text(safeNum(s.trimesters?.[2]), rx + 2, y + 4.5)
+      rx += colWidths[5]
       pdf.setFont("helvetica", "bold")
-      pdf.text(safeNum(subj.annual), rowX + colWidths[6] / 2, y + 4.5, { align: "center" })
-      rowX += colWidths[6]
+      pdf.text(safeNum(s.annual), rx + 2, y + 4.5)
+      rx += colWidths[6]
       pdf.setFont("helvetica", "normal")
-      pdf.text(String(subj.rank || "-"), rowX + colWidths[7] / 2, y + 4.5, { align: "center" })
-      rowX += colWidths[7]
-      pdf.text(getAppreciation(subj.annual, isEnglish), rowX + colWidths[8] / 2, y + 4.5, { align: "center" })
+      pdf.text(String(s.rank || "-"), rx + 2, y + 4.5)
+      rx += colWidths[7]
+      pdf.text(getAppreciation(s.annual, false), rx + 2, y + 4.5)
+      rx += colWidths[8]
+      pdf.text("", rx + 2, y + 4.5)
     } else {
-      // Logic for single sequence or trimester...
+      pdf.text(safeNum(s.average), rx + 2, y + 4.5)
+      rx += colWidths[3]
+      pdf.text(String(s.rank || "-"), rx + 2, y + 4.5)
+      rx += colWidths[4]
+      pdf.text(getAppreciation(s.average, false), rx + 2, y + 4.5)
+      rx += colWidths[5]
+      pdf.text("", rx + 2, y + 4.5)
     }
-    y += 6
+    y += 5.5
   })
 
-  y += 5
-  // Decision
+  y += 10
   pdf.setFont("helvetica", "bold")
-  const decision = isAnnual && data.promotion ? data.promotion.decision : getDecision(data.average, isEnglish)
-  pdf.text(`${isEnglish ? "Decision" : "Décision"}: ${decision}`, margin + 5, y + 5)
+  pdf.setFontSize(10)
+  pdf.text(`Moyenne Générale: ${data.average.toFixed(2)}/20`, margin, y)
+  pdf.text(`Rang: ${data.rank} / ${data.classSize}`, pageWidth / 2 + 10, y)
   
-  pdf.save(`Bulletin_${data.student.lastName}_${data.periodName}.pdf`)
+  y += 7
+  const decision = isAnnual && data.promotion ? data.promotion.decision : getDecision(data.average, false)
+  pdf.text(`Décision du Conseil: ${decision.toUpperCase()}`, margin, y)
+
+  y += 15
+  pdf.setFontSize(9)
+  pdf.text("Le Parent", margin + 15, y)
+  pdf.text("Le Principal", pageWidth / 2, y, { align: "center" })
+  pdf.text("Le Prof. Principal", pageWidth - margin - 35, y)
 }
 
 export const generateBulletinPDF = async (data: BulletinData) => {
   const pdf = new jsPDF()
-  const logo = data.schoolSettings.logo_url ? await loadLogo(data.schoolSettings.logo_url) : null
+  const logo = await loadLogo(data.schoolSettings.logo_url || "")
   drawBulletinPage(pdf, data, logo)
+  pdf.save(`Bulletin_${data.student.lastName}_${data.student.matricule}.pdf`)
 }
 
 export const generateMassBulletinsPDF = async (dataList: BulletinData[], filename: string) => {
   const pdf = new jsPDF()
-  const logo = dataList[0]?.schoolSettings.logo_url ? await loadLogo(dataList[0].schoolSettings.logo_url) : null
-  dataList.forEach((data, i) => {
+  const logo = await loadLogo(dataList[0]?.schoolSettings.logo_url || "")
+  for (let i = 0; i < dataList.length; i++) {
     if (i > 0) pdf.addPage()
-    drawBulletinPage(pdf, data, logo)
-  })
+    drawBulletinPage(pdf, dataList[i], logo)
+  }
   pdf.save(`${filename}.pdf`)
 }
 
 const loadLogo = async (url: string): Promise<string | null> => {
+  if (!url) return null
   try {
     const res = await fetch(url)
     const blob = await res.blob()
