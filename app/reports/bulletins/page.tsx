@@ -61,6 +61,14 @@ type LocalBulletinData = {
   trimesterSummaries?: Array<{ average: number | "NC"; rank: number | string }>
 }
 
+function getGradeColor(score: number | undefined | null): string {
+  if (score === undefined || score === null) return "text-muted-foreground"
+  if (score < 10) return "text-red-600 font-bold"
+  if (score < 12) return "text-amber-600"
+  if (score < 15) return "text-blue-600"
+  return "text-green-600"
+}
+
 export default function BulletinsPage() {
   const [loading, setLoading] = useState(true)
   const [classes, setClasses] = useState<ClassType[]>([])
@@ -141,7 +149,7 @@ export default function BulletinsPage() {
         return `${title} ${t.last_name || ""}`.trim()
       }
 
-      // Add level subjects
+      // Add level subjects first
       levelSubjsRes.data?.forEach((ls: any) => {
         if (ls.subject && ls.subject_id) {
           subjectsMap.set(ls.subject_id, {
@@ -188,12 +196,13 @@ export default function BulletinsPage() {
         const { data: allClassGrades } = await supabase
           .from("grades")
           .select("student_id, subject_id, score, academic_period_id")
+          .in("student_id", classStudentIds)
           .in("academic_period_id", yearSeqs.map(s => s.id))
         
         const myGrades = (allClassGrades || []).filter(g => g.student_id === studentId)
 
         subjects.forEach(s => {
-          const subjGrades = myGrades.filter(g => g.subject_id === s.id)
+          const sGrades = myGrades.filter(g => g.subject_id === s.id)
           const trimAvgs = yearTrims.map(trim => {
             // Trim 1: Seq 1,2 | Trim 2: Seq 3,4 | Trim 3: Seq 5,6
             const tSeqs = yearSeqs.filter(seq => 
@@ -202,7 +211,7 @@ export default function BulletinsPage() {
               (trim.number === 2 && seq.number >= 3 && seq.number <= 4) || 
               (trim.number === 3 && seq.number >= 5)
             )
-            const tGrades = subjGrades.filter(g => tSeqs.some(ts => ts.id === g.academic_period_id))
+            const tGrades = sGrades.filter(g => tSeqs.some(ts => ts.id === g.academic_period_id))
             if (tGrades.length === 0) return "NC"
             return Math.round((tGrades.reduce((sum, g) => sum + g.score, 0) / tGrades.length) * 100) / 100
           })
@@ -256,7 +265,7 @@ export default function BulletinsPage() {
           if (typeof myAvg === 'number' && studentTrimAvgs.length > 0) {
             const sorted = studentTrimAvgs.sort((a,b) => b-a)
             let rn = 1
-            for (const v of sorted) { if (v > myAvg) rn++; else break }
+            for (const v of sorted) { if (v > myAvg + 0.001) rn++; }
             r = `${rn}/${sorted.length}`
           }
           return { average: myAvg, rank: r }
@@ -311,7 +320,7 @@ export default function BulletinsPage() {
         classMax = Math.max(...finalAvgs)
         if (student.is_ranked !== false) {
           let r = 1
-          for (const a of finalAvgs) { if (a > average) r++; else break }
+          for (const a of finalAvgs) { if (a > average + 0.001) r++; }
           rank = r
         }
       }
@@ -368,9 +377,10 @@ export default function BulletinsPage() {
             student: { firstName: d.student.first_name, lastName: d.student.last_name, matricule: d.student.matricule, isRanked: !d.isUnranked },
             className: d.student.class?.name || "", periodName: d.period.name, periodType: d.period.type as any,
             academicYear: d.period.academic_year, section: d.section || "",
-            subjects: d.subjects.map(subj => ({ name: subj.name, teacher: subj.teacher_name, coefficient: subj.coefficient, average: typeof subj.annual === 'number' ? subj.annual : d.grades[subj.id]?.score, trimesters: subj.trimesters, annual: subj.annual, group: subj.group_name, rank: subj.rank })),
+            subjects: d.subjects.map(s => ({ name: s.name, teacher: s.teacher_name, coefficient: s.coefficient, average: typeof s.annual === 'number' ? s.annual : d.grades[s.id]?.score, trimesters: s.trimesters, annual: s.annual, group: s.group_name, rank: s.rank })),
             average: d.average, rank: d.rank, classSize: d.classSize, classAverage: d.classAverage, promotion: d.promotion,
             trimesterSummaries: d.trimesterSummaries,
+            classMin: d.classMin, classMax: d.classMax,
             schoolSettings: { school_name: schoolSettings?.school_name, school_slogan: schoolSettings?.school_slogan, address: schoolSettings?.address, phone: schoolSettings?.phone, logo_url: schoolSettings?.logo_url }
           })
         }
