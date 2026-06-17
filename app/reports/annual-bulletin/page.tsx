@@ -165,7 +165,6 @@ export default function AnnualBulletinPage() {
           .from("academic_periods")
           .select("academic_year")
           .order("academic_year", { ascending: false })
-          .distinct()
 
         const uniqueYears = [...new Set((periodsRes || []).map((p) => p.academic_year))]
         setYears(uniqueYears)
