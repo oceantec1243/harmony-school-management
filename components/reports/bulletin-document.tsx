@@ -15,7 +15,6 @@ interface BulletinDocumentProps {
       code: string
       coefficient: number
       group_name: string
-      group_order: number
       teacher_name?: string
       trimesters?: (number | "NC")[]
       annual?: number | "NC"
@@ -27,11 +26,14 @@ interface BulletinDocumentProps {
     rank: number | string
     classSize: number
     classAverage: number
+    classMin?: number
+    classMax?: number
     promotion?: {
       promoted: boolean
       nextClass: string | null
       decision: string
     }
+    trimesterSummaries?: Array<{ average: number | "NC"; rank: number | string }>
   }
   schoolSettings: any
 }

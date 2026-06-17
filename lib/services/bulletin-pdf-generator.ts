@@ -40,6 +40,7 @@ export interface BulletinData {
     school_slogan?: string
     address?: string
     phone?: string
+    email?: string
     logo_url?: string
   }
 }
@@ -80,36 +81,41 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   const t = {
     rep: isEnglish ? "REPUBLIC OF CAMEROON" : "RÉPUBLIQUE DU CAMEROUN",
     motto: isEnglish ? "Peace - Work - Fatherland" : "Paix - Travail - Patrie",
-    min: isEnglish ? "MINISTRY OF SECONDARY EDUCATION" : "MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES",
+    minES: isEnglish ? "MINISTRY OF SECONDARY EDUCATION" : "MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES",
     title: isAnnual ? (isEnglish ? "ANNUAL REPORT CARD" : "BULLETIN DE NOTES ANNUEL") : (isEnglish ? "PROGRESS REPORT" : "BULLETIN DE NOTES SÉQUENTIEL"),
     year: isEnglish ? "Academic Year" : "Année Scolaire",
-    name: isEnglish ? "Name" : "Nom",
-    mat: isEnglish ? "Matricule" : "Matricule",
-    class: isEnglish ? "Class" : "Classe",
-    eff: isEnglish ? "Roll" : "Effectif",
-    subj: isEnglish ? "Subject" : "Matière",
-    teacher: isEnglish ? "Teacher" : "Enseignant",
-    coef: isEnglish ? "Coef" : "Coef",
-    rank: isEnglish ? "Rank" : "Rang",
-    appr: isEnglish ? "Appreciation" : "Appréciation",
+    nameLabel: isEnglish ? "Name" : "Nom",
+    matLabel: isEnglish ? "Matricule" : "Matricule",
+    classLabel: isEnglish ? "Class" : "Classe",
+    effLabel: isEnglish ? "Roll" : "Effectif",
+    subjHeader: isEnglish ? "Subject" : "Matière",
+    teachHeader: isEnglish ? "Teacher" : "Enseignant",
+    rankHeader: isEnglish ? "Rank" : "Rang",
+    apprHeader: isEnglish ? "Appreciation" : "Appréciation",
     genAvg: isEnglish ? "General Average" : "Moyenne Générale",
     dec: isEnglish ? "Council Decision" : "Décision du Conseil",
     parent: isEnglish ? "Parent" : "Le Parent",
     principal: isEnglish ? "Principal" : "Le Principal",
     pTeacher: isEnglish ? "Class Teacher" : "Le Prof. Principal",
     classAvg: isEnglish ? "Class Avg" : "Moy. Classe",
-    min: isEnglish ? "Class Min" : "Moy. Min",
-    max: isEnglish ? "Class Max" : "Moy. Max"
+    cMin: isEnglish ? "Class Min" : "Moy. Min",
+    cMax: isEnglish ? "Class Max" : "Moy. Max"
   }
 
   // --- WATERMARK ---
   if (logoBase64) {
     try {
-      pdf.saveGraphicsState()
-      const gState = new (pdf as any).GState({ opacity: 0.05 })
-      pdf.setGState(gState)
-      pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80)
-      pdf.restoreGraphicsState()
+      // Use setGState if available on the instance (requires jspdf to have the state plugin)
+      if ((pdf as any).GState) {
+        pdf.saveGraphicsState()
+        const gState = new (pdf as any).GState({ opacity: 0.05 })
+        pdf.setGState(gState)
+        pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80)
+        pdf.restoreGraphicsState()
+      } else {
+        // Fallback for watermark without opacity plugin
+        pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80)
+      }
     } catch (e) { console.error("Watermark error:", e) }
   }
 
@@ -159,10 +165,10 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   // Student Info
   pdf.setFontSize(8.5)
   pdf.setFont("helvetica", "normal")
-  pdf.text(`${t.name}: ${data.student.lastName} ${data.student.firstName}`, 15, 63)
-  pdf.text(`${t.mat}: ${data.student.matricule}`, 15, 68)
-  pdf.text(`${t.class}: ${data.className}`, pageWidth / 2 + 5, 63)
-  pdf.text(`${t.eff}: ${data.classSize}`, pageWidth / 2 + 5, 68)
+  pdf.text(`${t.nameLabel}: ${data.student.lastName} ${data.student.firstName}`, 15, 63)
+  pdf.text(`${t.matLabel}: ${data.student.matricule}`, 15, 68)
+  pdf.text(`${t.classLabel}: ${data.className}`, pageWidth / 2 + 5, 63)
+  pdf.text(`${t.effLabel}: ${data.classSize}`, pageWidth / 2 + 5, 68)
 
   // --- SUBJECTS TABLE ---
   const groups = [...new Set(data.subjects.map(s => s.group))].sort()
@@ -206,8 +212,8 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
     startY: 72,
     head: [
       isAnnual 
-        ? [t.subj, t.teacher, "C", "T1", "T2", "T3", "An", t.rank, t.appr]
-        : [t.subj, t.teacher, "C", isEnglish ? "Mark" : "Note", t.rank, t.appr]
+        ? [t.subjHeader, t.teachHeader, "C", "T1", "T2", "T3", "An", t.rankHeader, t.apprHeader]
+        : [t.subjHeader, t.teachHeader, "C", isEnglish ? "Mark" : "Note", t.rankHeader, t.apprHeader]
     ],
     body: tableRows,
     theme: "grid",
@@ -234,7 +240,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   if (isAnnual && data.trimesterSummaries) {
     autoTable(pdf, {
       startY: finalY,
-      head: [[isEnglish ? "PERIOD" : "PÉRIODE", isEnglish ? "AVERAGE" : "MOYENNE", t.rank]],
+      head: [[isEnglish ? "PERIOD" : "PÉRIODE", isEnglish ? "AVERAGE" : "MOYENNE", t.rankHeader]],
       body: [
         ...data.trimesterSummaries.map((ts, i) => [`${isEnglish ? "TERM" : "TRIMESTRE"} ${i+1}`, safeNum(ts.average), String(ts.rank)]),
         [{ content: isEnglish ? "ANNUAL" : "ANNUEL", styles: { fontStyle: "bold", fillColor: [240, 248, 255] } }, { content: data.average.toFixed(2), styles: { fontStyle: "bold", halign: "center" } }, { content: String(data.rank), styles: { fontStyle: "bold", halign: "center" } }]
@@ -253,10 +259,10 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
     head: [[{ content: isEnglish ? "CLASS COUNCIL SUMMARY" : "RÉCAPITULATIF DU CONSEIL", colSpan: 2 }]],
     body: [
       [t.genAvg, `${data.average.toFixed(2)}/20`],
-      [t.rank, `${data.rank} ${isEnglish ? "out of" : "sur"} ${data.classSize}`],
+      [t.rankHeader, `${data.rank} ${isEnglish ? "out of" : "sur"} ${data.classSize}`],
       [t.classAvg, data.classAverage.toFixed(2)],
-      [t.max, data.classMax?.toFixed(2) || "---"],
-      [t.min, data.classMin?.toFixed(2) || "---"],
+      [t.cMax, data.classMax?.toFixed(2) || "---"],
+      [t.cMin, data.classMin?.toFixed(2) || "---"],
       [{ content: `${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, colSpan: 2, styles: { fontStyle: "bold", fillColor: [240, 240, 240], fontSize: 8 } }]
     ],
     theme: "grid",

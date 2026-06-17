@@ -148,7 +148,7 @@ export default function SettingsPage() {
           min_promotion_average: minAvg,
           unranked_coef_threshold: unrankedThreshold,
           min_rattrapage_average: rattrapageAvg,
-          min_honor_roll_average: honorAvg,
+          min_honor_roll_average: honorRollAvg,
           min_repetition_average: repetitionAvg,
           next_class_id: nextClassId === "none" ? null : nextClassId
         })
@@ -163,7 +163,7 @@ export default function SettingsPage() {
               min_promotion_average: minAvg, 
               unranked_coef_threshold: unrankedThreshold,
               min_rattrapage_average: rattrapageAvg,
-              min_honor_roll_average: honorAvg,
+              min_honor_roll_average: honorRollAvg,
               min_repetition_average: repetitionAvg,
               next_class_id: nextClassId === "none" ? null : nextClassId
             } 
