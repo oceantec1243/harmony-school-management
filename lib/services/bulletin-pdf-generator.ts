@@ -18,6 +18,8 @@ export interface BulletinData {
     lastName: string
     matricule: string
     isRanked?: boolean
+    dateOfBirth?: string
+    placeOfBirth?: string
   }
   className: string
   periodName: string
@@ -29,6 +31,8 @@ export interface BulletinData {
   rank: number | string
   classSize: number
   classAverage: number
+  classMin?: number
+  classMax?: number
   promotion?: { promoted: boolean; nextClass: string | null; decision: string }
   trimesterSummaries?: Array<{ average: number | "NC"; rank: number | string }>
   schoolSettings: {
@@ -45,84 +49,117 @@ const safeNum = (val: any): string => {
   return typeof val === 'number' ? val.toFixed(2) : String(val)
 }
 
-const getAppreciation = (score: any): string => {
+const getAppreciation = (score: any, isEnglish: boolean): string => {
   if (score === undefined || score === null || score === "NC") return "-"
   const s = typeof score === 'string' ? parseFloat(score) : score
-  if (s >= 18) return "Excellent"
-  if (s >= 16) return "Très Bien"
-  if (s >= 14) return "Bien"
-  if (s >= 12) return "Assez Bien"
-  if (s >= 10) return "Passable"
-  if (s >= 8) return "Insuffisant"
-  return "Très Faible"
+  if (isEnglish) {
+    if (s >= 18) return "Excellent"
+    if (s >= 16) return "Very Good"
+    if (s >= 14) return "Good"
+    if (s >= 12) return "Fairly Good"
+    if (s >= 10) return "Average"
+    if (s >= 8) return "Insufficient"
+    return "Very Weak"
+  } else {
+    if (s >= 18) return "Excellent"
+    if (s >= 16) return "Très Bien"
+    if (s >= 14) return "Bien"
+    if (s >= 12) return "Assez Bien"
+    if (s >= 10) return "Passable"
+    if (s >= 8) return "Insuffisant"
+    return "Très Faible"
+  }
 }
 
 const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
-  const isAnnual = data.periodType === "year" || data.periodName.toLowerCase().includes("annuel")
+  const isEnglish = data.section?.toLowerCase().includes("anglo")
+  const isAnnual = data.periodType === "year" || data.periodName.toLowerCase().includes("annuel") || data.periodName.toLowerCase().includes("full")
 
-  // --- OFFICIAL BILINGUAL HEADER ---
+  const t = {
+    rep: isEnglish ? "REPUBLIC OF CAMEROON" : "RÉPUBLIQUE DU CAMEROUN",
+    motto: isEnglish ? "Peace - Work - Fatherland" : "Paix - Travail - Patrie",
+    min: isEnglish ? "MINISTRY OF SECONDARY EDUCATION" : "MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES",
+    title: isAnnual ? (isEnglish ? "ANNUAL REPORT CARD" : "BULLETIN DE NOTES ANNUEL") : (isEnglish ? "PROGRESS REPORT" : "BULLETIN DE NOTES SÉQUENTIEL"),
+    year: isEnglish ? "Academic Year" : "Année Scolaire",
+    name: isEnglish ? "Name" : "Nom",
+    mat: isEnglish ? "Matricule" : "Matricule",
+    class: isEnglish ? "Class" : "Classe",
+    eff: isEnglish ? "Roll" : "Effectif",
+    subj: isEnglish ? "Subject" : "Matière",
+    teacher: isEnglish ? "Teacher" : "Enseignant",
+    coef: isEnglish ? "Coef" : "Coef",
+    rank: isEnglish ? "Rank" : "Rang",
+    appr: isEnglish ? "Appreciation" : "Appréciation",
+    genAvg: isEnglish ? "General Average" : "Moyenne Générale",
+    dec: isEnglish ? "Council Decision" : "Décision du Conseil",
+    parent: isEnglish ? "Parent" : "Le Parent",
+    principal: isEnglish ? "Principal" : "Le Principal",
+    pTeacher: isEnglish ? "Class Teacher" : "Le Prof. Principal",
+    classAvg: isEnglish ? "Class Avg" : "Moy. Classe",
+    min: isEnglish ? "Class Min" : "Moy. Min",
+    max: isEnglish ? "Class Max" : "Moy. Max"
+  }
+
+  // --- WATERMARK ---
+  if (data.schoolSettings.logo_url) {
+    // Note: Watermark drawing would need image loading, skipping for speed or assuming it's done via base64 later
+  }
+
+  // --- HEADER ---
   pdf.setFontSize(7)
   pdf.setFont("helvetica", "bold")
-  pdf.text("RÉPUBLIQUE DU CAMEROUN", 15, 10)
-  pdf.text("Paix - Travail - Patrie", 18, 13)
+  pdf.text(t.rep, 15, 10)
+  pdf.text(t.motto, 18, 13)
   pdf.text("**********", 22, 16)
-  pdf.text("MINISTÈRE DES ENSEIGNEMENTS", 14, 19)
-  pdf.text("SECONDAIRES", 22, 22)
+  pdf.text(t.min, 14, 19)
 
-  pdf.text("REPUBLIC OF CAMEROON", pageWidth - 55, 10)
-  pdf.text("Peace - Work - Fatherland", pageWidth - 55, 13)
-  pdf.text("**********", pageWidth - 42, 16)
-  pdf.text("MINISTRY OF SECONDARY", pageWidth - 55, 19)
-  pdf.text("EDUCATION", pageWidth - 48, 22)
+  pdf.text(t.rep.replace("RÉPUBLIQUE DU CAMEROUN", "REPUBLIC OF CAMEROON"), pageWidth - 55, 10, { align: "right" })
+  pdf.text(t.motto.replace("Paix - Travail - Patrie", "Peace - Work - Fatherland"), pageWidth - 55, 13, { align: "right" })
+  pdf.text("**********", pageWidth - 55, 16, { align: "right" })
+  pdf.text("MINISTRY OF SECONDARY EDUCATION", pageWidth - 55, 19, { align: "right" })
 
-  // School Info
   pdf.setFontSize(12)
   pdf.setTextColor(30, 64, 175)
-  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, 32, { align: "center" })
+  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, 30, { align: "center" })
   
   pdf.setFontSize(8)
   pdf.setTextColor(100)
-  pdf.text(data.schoolSettings.school_slogan || "", pageWidth / 2, 36, { align: "center" })
-  pdf.text(`B.P.: ${data.schoolSettings.address || ""} | Tél.: ${data.schoolSettings.phone || ""}`, pageWidth / 2, 40, { align: "center" })
+  pdf.text(data.schoolSettings.school_slogan || "", pageWidth / 2, 34, { align: "center" })
 
   pdf.setDrawColor(0)
   pdf.setLineWidth(0.5)
-  pdf.line(15, 42, pageWidth - 15, 42)
+  pdf.line(15, 40, pageWidth - 15, 40)
 
   // Title
   pdf.setFontSize(14)
   pdf.setTextColor(0)
   pdf.setFont("helvetica", "bold")
-  pdf.text(isAnnual ? "BULLETIN DE NOTES ANNUEL" : "BULLETIN DE NOTES SÉQUENTIEL", pageWidth / 2, 50, { align: "center" })
-  pdf.setFontSize(10)
-  pdf.text(`Année Scolaire: ${data.academicYear}`, pageWidth / 2, 55, { align: "center" })
+  pdf.text(t.title, pageWidth / 2, 48, { align: "center" })
+  pdf.setFontSize(9)
+  pdf.text(`${t.year}: ${data.academicYear}`, pageWidth / 2, 53, { align: "center" })
 
   // Student Info
   pdf.setFontSize(9)
   pdf.setFont("helvetica", "normal")
-  pdf.text(`Nom: ${data.student.lastName} ${data.student.firstName}`, 15, 65)
-  pdf.text(`Matricule: ${data.student.matricule}`, 15, 70)
-  pdf.text(`Classe: ${data.className}`, pageWidth / 2 + 5, 65)
-  pdf.text(`Effectif: ${data.classSize}`, pageWidth / 2 + 5, 70)
+  pdf.text(`${t.name}: ${data.student.lastName} ${data.student.firstName}`, 15, 62)
+  pdf.text(`${t.mat}: ${data.student.matricule}`, 15, 67)
+  pdf.text(`${t.class}: ${data.className}`, pageWidth / 2 + 5, 62)
+  pdf.text(`${t.eff}: ${data.classSize}`, pageWidth / 2 + 5, 67)
 
   // --- SUBJECTS TABLE ---
   const groups = [...new Set(data.subjects.map(s => s.group))].sort()
   const tableRows: any[] = []
 
   groups.forEach(groupName => {
-    tableRows.push([{ content: groupName, colSpan: isAnnual ? 9 : 6, styles: { fillColor: [240, 240, 240], fontStyle: "bold" } }])
+    tableRows.push([{ content: groupName, colSpan: isAnnual ? 9 : 6, styles: { fillColor: [240, 240, 240], fontStyle: "bold", fontSize: 7.5 } }])
     
     const groupSubjs = data.subjects.filter(s => s.group === groupName)
-    let gWeighted = 0, gCoef = 0
+    let gW = 0, gC = 0
     
     groupSubjs.forEach(s => {
-      const row = [
-        s.name,
-        s.teacher || "-",
-        s.coefficient,
-      ]
+      const row = [s.name, s.teacher || "-", s.coefficient]
       if (isAnnual) {
         row.push(safeNum(s.trimesters?.[0]))
         row.push(safeNum(s.trimesters?.[1]))
@@ -132,87 +169,90 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
         row.push(safeNum(s.average))
       }
       row.push(s.rank || "-")
-      row.push(getAppreciation(isAnnual ? s.annual : s.average))
+      row.push(getAppreciation(isAnnual ? s.annual : s.average, isEnglish))
       tableRows.push(row)
 
-      const score = isAnnual ? s.annual : s.average
-      if (typeof score === 'number') {
-        gWeighted += score * s.coefficient
-        gCoef += s.coefficient
-      }
+      const sc = isAnnual ? s.annual : s.average
+      if (typeof sc === 'number') { gW += sc * s.coefficient; gC += s.coefficient }
     })
 
-    if (gCoef > 0) {
+    if (gC > 0) {
       tableRows.push([
-        { content: `MOYENNE ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 6.5 } },
-        gCoef,
-        { content: (gWeighted / gCoef).toFixed(2), colSpan: isAnnual ? 4 : 1, styles: { halign: "center", fontStyle: "bold", textColor: [30, 64, 175] } },
+        { content: `${isEnglish ? "AVG" : "MOYENNE"} ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 6.5 } },
+        gC,
+        { content: (gW / gC).toFixed(2), colSpan: isAnnual ? 4 : 1, styles: { halign: "center", fontStyle: "bold", textColor: [30, 64, 175] } },
         "", ""
       ])
     }
   })
 
   autoTable(pdf, {
-    startY: 75,
+    startY: 72,
     head: [
       isAnnual 
-        ? ["Matière", "Enseignant", "C", "T1", "T2", "T3", "An", "Rang", "Appréciation"]
-        : ["Matière", "Enseignant", "C", "Note", "Rang", "Appréciation"]
+        ? [t.subj, t.teacher, "C", "T1", "T2", "T3", "An", t.rank, t.appr]
+        : [t.subj, t.teacher, "C", isEnglish ? "Mark" : "Note", t.rank, t.appr]
     ],
     body: tableRows,
     theme: "grid",
     headStyles: { fillColor: [30, 64, 175], fontSize: 8, halign: "center" },
-    bodyStyles: { fontSize: 7 },
+    bodyStyles: { fontSize: 7, cellPadding: 1 },
     columnStyles: {
-      0: { cellWidth: 40 },
-      1: { cellWidth: 30 },
+      0: { cellWidth: 38 },
+      1: { cellWidth: 28 },
       2: { halign: "center", cellWidth: 7 },
       3: { halign: "center" },
       4: { halign: "center" },
       5: { halign: "center" },
       6: { halign: "center" },
-      7: { halign: "center" },
-      8: { halign: "center" }
+      7: { halign: "center", cellWidth: 12 },
+      8: { halign: "center", cellWidth: 18 }
     }
   })
 
   // --- FOOTER SUMMARY ---
-  let finalY = (pdf as any).lastAutoTable.finalY + 8
-  if (finalY > pageHeight - 65) { pdf.addPage(); finalY = 20 }
+  let finalY = (pdf as any).lastAutoTable.finalY + 5
+  if (finalY > pageHeight - 55) { pdf.addPage(); finalY = 20 }
 
   // Trimester Summary Table
   if (isAnnual && data.trimesterSummaries) {
     autoTable(pdf, {
       startY: finalY,
-      head: [["PÉRIODE", "MOYENNE", "RANG"]],
+      head: [[isEnglish ? "PERIOD" : "PÉRIODE", isEnglish ? "AVERAGE" : "MOYENNE", t.rank]],
       body: [
-        ...data.trimesterSummaries.map((ts, i) => [`TRIMESTRE ${i+1}`, safeNum(ts.average), String(ts.rank)]),
-        [{ content: "ANNUEL", styles: { fontStyle: "bold", fillColor: [240, 248, 255] } }, { content: data.average.toFixed(2), styles: { fontStyle: "bold", halign: "center" } }, { content: String(data.rank), styles: { fontStyle: "bold", halign: "center" } }]
+        ...data.trimesterSummaries.map((ts, i) => [`${isEnglish ? "TERM" : "TRIMESTRE"} ${i+1}`, safeNum(ts.average), String(ts.rank)]),
+        [{ content: isEnglish ? "ANNUAL" : "ANNUEL", styles: { fontStyle: "bold", fillColor: [240, 248, 255] } }, { content: data.average.toFixed(2), styles: { fontStyle: "bold", halign: "center" } }, { content: String(data.rank), styles: { fontStyle: "bold", halign: "center" } }]
       ],
       theme: "grid",
       margin: { left: 15 },
-      tableWidth: 70,
-      styles: { fontSize: 7.5 },
+      tableWidth: 65,
+      styles: { fontSize: 7, cellPadding: 1 },
       headStyles: { fillColor: [51, 65, 85] }
     })
   }
 
-  const resultX = isAnnual ? 100 : 15
+  const resultX = isAnnual ? 95 : 15
   const resultY = finalY
   
   pdf.setFont("helvetica", "bold")
-  pdf.setFontSize(10)
-  pdf.setTextColor(0)
-  pdf.text(`MOYENNE GÉNÉRALE: ${data.average.toFixed(2)} / 20`, resultX, resultY + 5)
-  pdf.text(`RANG GLOBAL: ${data.rank} sur ${data.classSize}`, resultX, resultY + 12)
-  pdf.text(`DÉCISION: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "TRAVAIL PASSABLE"}`, resultX, resultY + 19)
+  pdf.setFontSize(9)
+  pdf.text(`${t.genAvg}: ${data.average.toFixed(2)} / 20`, resultX, resultY + 4)
+  pdf.text(`${t.rank}: ${data.rank} ${isEnglish ? "out of" : "sur"} ${data.classSize}`, resultX, resultY + 9)
+  
+  pdf.setFontSize(7)
+  pdf.text(`${t.classAvg}: ${data.classAverage.toFixed(2)}`, resultX, resultY + 14)
+  pdf.text(`${t.max}: ${data.classMax?.toFixed(2) || "-"}`, resultX + 35, resultY + 14)
+  pdf.text(`${t.min}: ${data.classMin?.toFixed(2) || "-"}`, resultX + 65, resultY + 14)
+
+  pdf.setFontSize(9)
+  pdf.text(`${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, resultX, resultY + 21)
 
   // Signatures
-  const sigY = pageHeight - 20
+  const sigY = pageHeight - 15
   pdf.setFontSize(8)
-  pdf.text("Le Parent", 25, sigY)
-  pdf.text("Le Principal", pageWidth / 2, sigY, { align: "center" })
-  pdf.text("Le Prof. Principal", pageWidth - 50, sigY)
+  pdf.text(t.parent, 25, sigY)
+  pdf.text(t.principal, pageWidth / 2, sigY, { align: "center" })
+  pdf.text(t.pTeacher, pageWidth - 50, sigY)
 }
 
 export const generateBulletinPDF = async (data: BulletinData) => {

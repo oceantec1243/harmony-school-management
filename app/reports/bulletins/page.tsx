@@ -125,13 +125,21 @@ export default function BulletinsPage() {
 
       // 1. FETCH ALL SUBJECTS (Level Core + Class Specialties)
       const [classSubjsRes, levelSubjsRes] = await Promise.all([
-        supabase.from("class_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("class_id", classId),
-        levelId ? supabase.from("level_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("level_id", levelId).eq("section_id", sectionId) : Promise.resolve({data: []})
+        supabase.from("class_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name, gender), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("class_id", classId),
+        levelId ? supabase.from("level_subjects").select("subject_id, coefficient, teacher:teachers(first_name, last_name, gender), subject:subjects(id, name, code, subject_group:subject_groups(name))").eq("level_id", levelId).eq("section_id", sectionId) : Promise.resolve({data: []})
       ])
 
       const subjectsMap = new Map<string, Subject>()
       
-      // Add level subjects first
+      const getTeacherName = (t: any, isEnglish: boolean) => {
+        if (!t) return undefined
+        const title = isEnglish 
+          ? (t.gender === 'F' ? 'Mrs' : 'Mr') 
+          : (t.gender === 'F' ? 'Mme' : 'M.')
+        return `${title} ${t.last_name || ""}`.trim()
+      }
+
+      // Add level subjects
       levelSubjsRes.data?.forEach((ls: any) => {
         if (ls.subject && ls.subject_id) {
           subjectsMap.set(ls.subject_id, {
@@ -140,12 +148,12 @@ export default function BulletinsPage() {
             code: ls.subject.code,
             coefficient: ls.coefficient || 1,
             group_name: ls.subject.subject_group?.name || "Autres",
-            teacher_name: ls.teacher ? `${ls.teacher.first_name || ""} ${ls.teacher.last_name || ""}`.trim() : undefined
+            teacher_name: getTeacherName(ls.teacher, isEnglish)
           })
         }
       })
 
-      // Class subjects override or add to level subjects
+      // Class subjects override
       classSubjsRes.data?.forEach((cs: any) => {
         if (cs.subject && cs.subject_id) {
           subjectsMap.set(cs.subject_id, {
@@ -154,26 +162,32 @@ export default function BulletinsPage() {
             code: cs.subject.code,
             coefficient: cs.coefficient || 1,
             group_name: cs.subject.subject_group?.name || "Autres",
-            teacher_name: cs.teacher ? `${cs.teacher.first_name || ""} ${cs.teacher.last_name || ""}`.trim() : subjectsMap.get(cs.subject_id)?.teacher_name
+            teacher_name: getTeacherName(cs.teacher, isEnglish) || subjectsMap.get(cs.subject_id)?.teacher_name
           })
         }
       })
 
       const subjects = Array.from(subjectsMap.values()).sort((a, b) => a.group_name.localeCompare(b.group_name) || a.name.localeCompare(b.name))
-      const subjectIds = subjects.map(s => s.id)
 
-      // 2. FETCH GRADES & CALCULATE
+      // 2. FETCH GRADES
       const grades: Record<string, { score: number; coefficient: number }> = {}
       let trimesterSummaries: any[] = []
       let promotion: any = undefined
+
+      // Get all students in this class for ranking
+      const classStudentIds = students.map(s => s.id)
 
       if (isAnnual) {
         const yearPeriods = periods.filter(p => p.academic_year === academicYear)
         const yearSeqs = yearPeriods.filter(p => p.type === "sequence")
         const yearTrims = yearPeriods.filter(p => p.type === "trimester")
         
-        // Fetch ALL grades for ranking and display
-        const { data: allClassGrades } = await supabase.from("grades").select("student_id, subject_id, score, academic_period_id").in("academic_period_id", yearSeqs.map(s => s.id))
+        // SCOPED QUERY: Only fetch grades for students in THIS class
+        const { data: allClassGrades } = await supabase
+          .from("grades")
+          .select("student_id, subject_id, score, academic_period_id")
+          .in("student_id", classStudentIds)
+          .in("academic_period_id", yearSeqs.map(s => s.id))
         
         const myGrades = (allClassGrades || []).filter(g => g.student_id === studentId)
 
@@ -192,7 +206,7 @@ export default function BulletinsPage() {
           s.annual = annualAvg
           if (typeof annualAvg === 'number') grades[s.id] = { score: annualAvg, coefficient: s.coefficient }
 
-          // Calculate subject rank
+          // Calculate subject rank among CLASSMATES
           const otherAvgs = students.filter(os => os.is_ranked !== false).map(os => {
             const osG = (allClassGrades || []).filter(g => g.student_id === os.id && g.subject_id === s.id)
             return osG.length > 0 ? osG.reduce((sum, g) => sum + g.score, 0) / osG.length : null
@@ -261,11 +275,15 @@ export default function BulletinsPage() {
       const totalC = Object.values(grades).reduce((s, g) => s + g.coefficient, 0)
       const average = totalC > 0 ? Math.round((totalP / totalC) * 100) / 100 : 0
 
-      // Overall Class Average and Individual Rank
-      let classAverage = 0
+      // Overall Class Average, Rank, Min, Max (SCOPED TO CURRENT CLASS)
+      let classAverage = 0, classMin = 0, classMax = 0
       let rank: number | string = "-"
       
-      const { data: allStudentsGrades } = await supabase.from("grades").select("student_id, score, coefficient").in("academic_period_id", isAnnual ? periods.filter(p => p.academic_year === academicYear && p.type === "sequence").map(p => p.id) : [selectedPeriod])
+      const { data: allStudentsGrades } = await supabase
+        .from("grades")
+        .select("student_id, score, coefficient")
+        .in("student_id", classStudentIds)
+        .in("academic_period_id", isAnnual ? periods.filter(p => p.academic_year === academicYear && p.type === "sequence").map(p => p.id) : [selectedPeriod])
       
       const studAvgsMap = new Map<string, {tw: number, tc: number}>()
       allStudentsGrades?.forEach(g => {
@@ -276,6 +294,8 @@ export default function BulletinsPage() {
       const finalAvgs = Array.from(studAvgsMap.values()).map(v => v.tw / v.tc).sort((a,b) => b-a)
       if (finalAvgs.length > 0) {
         classAverage = Math.round((finalAvgs.reduce((s, a) => s + a, 0) / finalAvgs.length) * 100) / 100
+        classMin = Math.min(...finalAvgs)
+        classMax = Math.max(...finalAvgs)
         if (student.is_ranked !== false) {
           let r = 1
           for (const a of finalAvgs) { if (a > average) r++; else break }
@@ -285,6 +305,7 @@ export default function BulletinsPage() {
 
       return {
         student, period, subjects, grades, groupAverages, average, rank, classSize: students.length, classAverage,
+        classMin, classMax,
         isUnranked: student.is_ranked === false, section: student.class?.section?.name, promotion, trimesterSummaries
       }
     } catch (e) { console.error(e); return null }
