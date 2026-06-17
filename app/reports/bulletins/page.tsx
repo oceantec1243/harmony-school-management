@@ -344,7 +344,10 @@ export default function BulletinsPage() {
           average: typeof s.annual === 'number' ? s.annual : bulletinData.grades[s.id]?.score, 
           trimesters: s.trimesters, annual: s.annual, group: s.group_name, rank: s.rank 
         })),
-        average: bulletinData.average, rank: bulletinData.rank, classSize: bulletinData.classSize, classAverage: bulletinData.classAverage, promotion: bulletinData.promotion,
+        average: bulletinData.average, rank: bulletinData.rank, 
+        classSize: bulletinData.classSize, classAverage: bulletinData.classAverage, 
+        classMin: bulletinData.classMin, classMax: bulletinData.classMax,
+        promotion: bulletinData.promotion,
         trimesterSummaries: bulletinData.trimesterSummaries,
         schoolSettings: { school_name: schoolSettings?.school_name, school_slogan: schoolSettings?.school_slogan, address: schoolSettings?.address, phone: schoolSettings?.phone, logo_url: schoolSettings?.logo_url }
       }

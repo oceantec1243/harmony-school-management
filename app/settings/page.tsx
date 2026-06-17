@@ -737,12 +737,12 @@ export default function SettingsPage() {
                             const minAvg = parseFloat((document.getElementById(`min-avg-${cls.id}`) as HTMLInputElement).value)
                             const rattrapageAvg = parseFloat((document.getElementById(`rattrapage-avg-${cls.id}`) as HTMLInputElement).value)
                             const repetitionAvg = parseFloat((document.getElementById(`repetition-avg-${cls.id}`) as HTMLInputElement).value)
-                            const honorAvg = parseFloat((document.getElementById(`honor-avg-${cls.id}`) as HTMLInputElement).value)
+                            const honorRollAvg = parseFloat((document.getElementById(`honor-avg-${cls.id}`) as HTMLInputElement).value)
                             const unranked = parseInt((document.getElementById(`unranked-${cls.id}`) as HTMLInputElement).value)
                             const nextClassInput = document.getElementById(`next-class-${cls.id}`) as HTMLInputElement
                             const nextClassId = nextClassInput ? nextClassInput.value : cls.next_class_id
                             
-                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, honorAvg, repetitionAvg, nextClassId)
+                            handleUpdateClassCriteria(cls.id, minAvg, unranked, rattrapageAvg, honorRollAvg, repetitionAvg, nextClassId)
                           }}
                         >
                           <Save className="h-3 w-3 mr-1" />

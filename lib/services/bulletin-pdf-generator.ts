@@ -104,27 +104,36 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
 
   // --- WATERMARK ---
   if (logoBase64) {
-    pdf.saveGraphicsState()
-    pdf.setGState(new (pdf as any).GState({ opacity: 0.05 }))
-    pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 50, pageHeight / 2 - 50, 100, 100)
-    pdf.restoreGraphicsState()
+    try {
+      pdf.saveGraphicsState()
+      const gState = new (pdf as any).GState({ opacity: 0.05 })
+      pdf.setGState(gState)
+      pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 40, pageHeight / 2 - 40, 80, 80)
+      pdf.restoreGraphicsState()
+    } catch (e) { console.error("Watermark error:", e) }
   }
 
   // --- HEADER ---
   pdf.setFontSize(7)
   pdf.setFont("helvetica", "bold")
+  pdf.setTextColor(0)
+  
+  // Left - French
   pdf.text("RÉPUBLIQUE DU CAMEROUN", 15, 10)
   pdf.text("Paix - Travail - Patrie", 18, 13)
   pdf.text("**********", 22, 16)
-  pdf.text("MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES", 11, 19)
+  pdf.text("MINISTÈRE DES ENSEIGNEMENTS", 13, 19)
+  pdf.text("SECONDAIRES", 22, 22)
 
+  // Right - English
   pdf.text("REPUBLIC OF CAMEROON", pageWidth - 15, 10, { align: "right" })
   pdf.text("Peace - Work - Fatherland", pageWidth - 15, 13, { align: "right" })
   pdf.text("**********", pageWidth - 42, 16, { align: "right" })
-  pdf.text("MINISTRY OF SECONDARY EDUCATION", pageWidth - 15, 19, { align: "right" })
+  pdf.text("MINISTRY OF SECONDARY", pageWidth - 15, 19, { align: "right" })
+  pdf.text("EDUCATION", pageWidth - 15, 22, { align: "right" })
 
   if (logoBase64) {
-    pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 12, 8, 24, 24)
+    try { pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 12, 8, 24, 24) } catch (e) {}
   }
 
   pdf.setFontSize(11)
@@ -148,19 +157,19 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   pdf.text(`${t.year}: ${data.academicYear}`, pageWidth / 2, 55, { align: "center" })
 
   // Student Info
-  pdf.setFontSize(9)
+  pdf.setFontSize(8.5)
   pdf.setFont("helvetica", "normal")
-  pdf.text(`${t.name}: ${data.student.lastName} ${data.student.firstName}`, 15, 64)
-  pdf.text(`${t.mat}: ${data.student.matricule}`, 15, 69)
-  pdf.text(`${t.class}: ${data.className}`, pageWidth / 2 + 5, 64)
-  pdf.text(`${t.eff}: ${data.classSize}`, pageWidth / 2 + 5, 69)
+  pdf.text(`${t.name}: ${data.student.lastName} ${data.student.firstName}`, 15, 63)
+  pdf.text(`${t.mat}: ${data.student.matricule}`, 15, 68)
+  pdf.text(`${t.class}: ${data.className}`, pageWidth / 2 + 5, 63)
+  pdf.text(`${t.eff}: ${data.classSize}`, pageWidth / 2 + 5, 68)
 
   // --- SUBJECTS TABLE ---
   const groups = [...new Set(data.subjects.map(s => s.group))].sort()
   const tableRows: any[] = []
 
   groups.forEach(groupName => {
-    tableRows.push([{ content: groupName, colSpan: isAnnual ? 9 : 6, styles: { fillColor: [240, 240, 240], fontStyle: "bold", fontSize: 7.5 } }])
+    tableRows.push([{ content: groupName, colSpan: isAnnual ? 9 : 6, styles: { fillColor: [240, 240, 240], fontStyle: "bold", fontSize: 7 } }])
     
     const groupSubjs = data.subjects.filter(s => s.group === groupName)
     let gW = 0, gC = 0
@@ -185,7 +194,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
 
     if (gC > 0) {
       tableRows.push([
-        { content: `${isEnglish ? "AVG" : "MOYENNE"} ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 6.5 } },
+        { content: `${isEnglish ? "AVG" : "MOYENNE"} ${groupName}`, colSpan: 2, styles: { halign: "right", fontStyle: "italic", fontSize: 6 } },
         gC,
         { content: (gW / gC).toFixed(2), colSpan: isAnnual ? 4 : 1, styles: { halign: "center", fontStyle: "bold", textColor: [30, 64, 175] } },
         "", ""
@@ -194,7 +203,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   })
 
   autoTable(pdf, {
-    startY: 74,
+    startY: 72,
     head: [
       isAnnual 
         ? [t.subj, t.teacher, "C", "T1", "T2", "T3", "An", t.rank, t.appr]
@@ -202,11 +211,11 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
     ],
     body: tableRows,
     theme: "grid",
-    headStyles: { fillColor: [30, 64, 175], fontSize: 8, halign: "center" },
-    bodyStyles: { fontSize: 7, cellPadding: 1 },
+    headStyles: { fillColor: [30, 64, 175], fontSize: 7.5, halign: "center", cellPadding: 0.8 },
+    bodyStyles: { fontSize: 6.5, cellPadding: 0.8 },
     columnStyles: {
-      0: { cellWidth: 38 },
-      1: { cellWidth: 28 },
+      0: { cellWidth: 42 },
+      1: { cellWidth: 32 },
       2: { halign: "center", cellWidth: 7 },
       3: { halign: "center" },
       4: { halign: "center" },
@@ -218,8 +227,8 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   })
 
   // --- FOOTER SUMMARY ---
-  let finalY = (pdf as any).lastAutoTable.finalY + 5
-  if (finalY > pageHeight - 65) { pdf.addPage(); finalY = 20 }
+  let finalY = (pdf as any).lastAutoTable.finalY + 4
+  if (finalY > pageHeight - 55) { pdf.addPage(); finalY = 20 }
 
   // Trimester Summary Table (Left)
   if (isAnnual && data.trimesterSummaries) {
@@ -233,7 +242,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
       theme: "grid",
       margin: { left: 15 },
       tableWidth: 65,
-      styles: { fontSize: 7, cellPadding: 1 },
+      styles: { fontSize: 7, cellPadding: 0.8 },
       headStyles: { fillColor: [51, 65, 85] }
     })
   }
@@ -248,19 +257,20 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
       [t.classAvg, data.classAverage.toFixed(2)],
       [t.max, data.classMax?.toFixed(2) || "---"],
       [t.min, data.classMin?.toFixed(2) || "---"],
-      [{ content: `${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, colSpan: 2, styles: { fontStyle: "bold", fillColor: [240, 240, 240] } }]
+      [{ content: `${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, colSpan: 2, styles: { fontStyle: "bold", fillColor: [240, 240, 240], fontSize: 8 } }]
     ],
     theme: "grid",
-    margin: { left: isAnnual ? 100 : 15 },
+    margin: { left: isAnnual ? 95 : 15 },
     tableWidth: 85,
     styles: { fontSize: 7, cellPadding: 1 },
     headStyles: { fillColor: [51, 65, 85] }
   })
 
   // Signatures
-  const sigY = pageHeight - 18
+  const sigY = pageHeight - 15
   pdf.setFontSize(8)
   pdf.setTextColor(0)
+  pdf.setFont("helvetica", "bold")
   pdf.text(t.parent, 25, sigY)
   pdf.text(t.principal, pageWidth / 2, sigY, { align: "center" })
   pdf.text(t.pTeacher, pageWidth - 50, sigY)
@@ -268,6 +278,7 @@ const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: stri
   // Footer Notice
   pdf.setFontSize(6)
   pdf.setTextColor(150)
+  pdf.setFont("helvetica", "normal")
   pdf.text("généré par Harmony by OceanTechnologie", pageWidth / 2, pageHeight - 5, { align: "center" })
 }
 
