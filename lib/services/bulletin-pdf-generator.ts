@@ -71,7 +71,7 @@ const getAppreciation = (score: any, isEnglish: boolean): string => {
   }
 }
 
-const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
+const drawBulletinPage = async (pdf: jsPDF, data: BulletinData, logoBase64: string | null) => {
   const pageWidth = pdf.internal.pageSize.getWidth()
   const pageHeight = pdf.internal.pageSize.getHeight()
   const isEnglish = data.section?.toLowerCase().includes("anglo")
@@ -103,50 +103,57 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
   }
 
   // --- WATERMARK ---
-  if (data.schoolSettings.logo_url) {
-    // Note: Watermark drawing would need image loading, skipping for speed or assuming it's done via base64 later
+  if (logoBase64) {
+    pdf.saveGraphicsState()
+    pdf.setGState(new (pdf as any).GState({ opacity: 0.05 }))
+    pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 50, pageHeight / 2 - 50, 100, 100)
+    pdf.restoreGraphicsState()
   }
 
   // --- HEADER ---
   pdf.setFontSize(7)
   pdf.setFont("helvetica", "bold")
-  pdf.text(t.rep, 15, 10)
-  pdf.text(t.motto, 18, 13)
+  pdf.text("RÉPUBLIQUE DU CAMEROUN", 15, 10)
+  pdf.text("Paix - Travail - Patrie", 18, 13)
   pdf.text("**********", 22, 16)
-  pdf.text(t.min, 14, 19)
+  pdf.text("MINISTÈRE DES ENSEIGNEMENTS SECONDAIRES", 11, 19)
 
-  pdf.text(t.rep.replace("RÉPUBLIQUE DU CAMEROUN", "REPUBLIC OF CAMEROON"), pageWidth - 55, 10, { align: "right" })
-  pdf.text(t.motto.replace("Paix - Travail - Patrie", "Peace - Work - Fatherland"), pageWidth - 55, 13, { align: "right" })
-  pdf.text("**********", pageWidth - 55, 16, { align: "right" })
-  pdf.text("MINISTRY OF SECONDARY EDUCATION", pageWidth - 55, 19, { align: "right" })
+  pdf.text("REPUBLIC OF CAMEROON", pageWidth - 15, 10, { align: "right" })
+  pdf.text("Peace - Work - Fatherland", pageWidth - 15, 13, { align: "right" })
+  pdf.text("**********", pageWidth - 42, 16, { align: "right" })
+  pdf.text("MINISTRY OF SECONDARY EDUCATION", pageWidth - 15, 19, { align: "right" })
 
-  pdf.setFontSize(12)
+  if (logoBase64) {
+    pdf.addImage(logoBase64, "PNG", pageWidth / 2 - 12, 8, 24, 24)
+  }
+
+  pdf.setFontSize(11)
   pdf.setTextColor(30, 64, 175)
-  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, 30, { align: "center" })
+  pdf.text(data.schoolSettings.school_name.toUpperCase(), pageWidth / 2, 36, { align: "center" })
   
-  pdf.setFontSize(8)
+  pdf.setFontSize(7)
   pdf.setTextColor(100)
-  pdf.text(data.schoolSettings.school_slogan || "", pageWidth / 2, 34, { align: "center" })
+  pdf.text(data.schoolSettings.school_slogan || "", pageWidth / 2, 40, { align: "center" })
 
   pdf.setDrawColor(0)
   pdf.setLineWidth(0.5)
-  pdf.line(15, 40, pageWidth - 15, 40)
+  pdf.line(15, 42, pageWidth - 15, 42)
 
   // Title
-  pdf.setFontSize(14)
+  pdf.setFontSize(13)
   pdf.setTextColor(0)
   pdf.setFont("helvetica", "bold")
-  pdf.text(t.title, pageWidth / 2, 48, { align: "center" })
+  pdf.text(t.title, pageWidth / 2, 50, { align: "center" })
   pdf.setFontSize(9)
-  pdf.text(`${t.year}: ${data.academicYear}`, pageWidth / 2, 53, { align: "center" })
+  pdf.text(`${t.year}: ${data.academicYear}`, pageWidth / 2, 55, { align: "center" })
 
   // Student Info
   pdf.setFontSize(9)
   pdf.setFont("helvetica", "normal")
-  pdf.text(`${t.name}: ${data.student.lastName} ${data.student.firstName}`, 15, 62)
-  pdf.text(`${t.mat}: ${data.student.matricule}`, 15, 67)
-  pdf.text(`${t.class}: ${data.className}`, pageWidth / 2 + 5, 62)
-  pdf.text(`${t.eff}: ${data.classSize}`, pageWidth / 2 + 5, 67)
+  pdf.text(`${t.name}: ${data.student.lastName} ${data.student.firstName}`, 15, 64)
+  pdf.text(`${t.mat}: ${data.student.matricule}`, 15, 69)
+  pdf.text(`${t.class}: ${data.className}`, pageWidth / 2 + 5, 64)
+  pdf.text(`${t.eff}: ${data.classSize}`, pageWidth / 2 + 5, 69)
 
   // --- SUBJECTS TABLE ---
   const groups = [...new Set(data.subjects.map(s => s.group))].sort()
@@ -187,7 +194,7 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
   })
 
   autoTable(pdf, {
-    startY: 72,
+    startY: 74,
     head: [
       isAnnual 
         ? [t.subj, t.teacher, "C", "T1", "T2", "T3", "An", t.rank, t.appr]
@@ -212,9 +219,9 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
 
   // --- FOOTER SUMMARY ---
   let finalY = (pdf as any).lastAutoTable.finalY + 5
-  if (finalY > pageHeight - 55) { pdf.addPage(); finalY = 20 }
+  if (finalY > pageHeight - 65) { pdf.addPage(); finalY = 20 }
 
-  // Trimester Summary Table
+  // Trimester Summary Table (Left)
   if (isAnnual && data.trimesterSummaries) {
     autoTable(pdf, {
       startY: finalY,
@@ -231,41 +238,65 @@ const drawBulletinPage = (pdf: jsPDF, data: BulletinData) => {
     })
   }
 
-  const resultX = isAnnual ? 95 : 15
-  const resultY = finalY
-  
-  pdf.setFont("helvetica", "bold")
-  pdf.setFontSize(9)
-  pdf.text(`${t.genAvg}: ${data.average.toFixed(2)} / 20`, resultX, resultY + 4)
-  pdf.text(`${t.rank}: ${data.rank} ${isEnglish ? "out of" : "sur"} ${data.classSize}`, resultX, resultY + 9)
-  
-  pdf.setFontSize(7)
-  pdf.text(`${t.classAvg}: ${data.classAverage.toFixed(2)}`, resultX, resultY + 14)
-  pdf.text(`${t.max}: ${data.classMax?.toFixed(2) || "-"}`, resultX + 35, resultY + 14)
-  pdf.text(`${t.min}: ${data.classMin?.toFixed(2) || "-"}`, resultX + 65, resultY + 14)
-
-  pdf.setFontSize(9)
-  pdf.text(`${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, resultX, resultY + 21)
+  // Results Table (Right)
+  autoTable(pdf, {
+    startY: finalY,
+    head: [[{ content: isEnglish ? "CLASS COUNCIL SUMMARY" : "RÉCAPITULATIF DU CONSEIL", colSpan: 2 }]],
+    body: [
+      [t.genAvg, `${data.average.toFixed(2)}/20`],
+      [t.rank, `${data.rank} ${isEnglish ? "out of" : "sur"} ${data.classSize}`],
+      [t.classAvg, data.classAverage.toFixed(2)],
+      [t.max, data.classMax?.toFixed(2) || "---"],
+      [t.min, data.classMin?.toFixed(2) || "---"],
+      [{ content: `${t.dec}: ${isAnnual && data.promotion ? data.promotion.decision.toUpperCase() : "---"}`, colSpan: 2, styles: { fontStyle: "bold", fillColor: [240, 240, 240] } }]
+    ],
+    theme: "grid",
+    margin: { left: isAnnual ? 100 : 15 },
+    tableWidth: 85,
+    styles: { fontSize: 7, cellPadding: 1 },
+    headStyles: { fillColor: [51, 65, 85] }
+  })
 
   // Signatures
-  const sigY = pageHeight - 15
+  const sigY = pageHeight - 18
   pdf.setFontSize(8)
+  pdf.setTextColor(0)
   pdf.text(t.parent, 25, sigY)
   pdf.text(t.principal, pageWidth / 2, sigY, { align: "center" })
   pdf.text(t.pTeacher, pageWidth - 50, sigY)
+
+  // Footer Notice
+  pdf.setFontSize(6)
+  pdf.setTextColor(150)
+  pdf.text("généré par Harmony by OceanTechnologie", pageWidth / 2, pageHeight - 5, { align: "center" })
 }
 
 export const generateBulletinPDF = async (data: BulletinData) => {
   const pdf = new jsPDF()
-  drawBulletinPage(pdf, data)
+  const logo = data.schoolSettings.logo_url ? await loadLogo(data.schoolSettings.logo_url) : null
+  await drawBulletinPage(pdf, data, logo)
   pdf.save(`Bulletin_${data.student.lastName}.pdf`)
 }
 
 export const generateMassBulletinsPDF = async (dataList: BulletinData[], filename: string) => {
   const pdf = new jsPDF()
+  const logo = dataList[0]?.schoolSettings.logo_url ? await loadLogo(dataList[0].schoolSettings.logo_url) : null
   for (let i = 0; i < dataList.length; i++) {
     if (i > 0) pdf.addPage()
-    drawBulletinPage(pdf, dataList[i])
+    await drawBulletinPage(pdf, dataList[i], logo)
   }
   pdf.save(`${filename}.pdf`)
+}
+
+const loadLogo = async (url: string): Promise<string | null> => {
+  if (!url) return null
+  try {
+    const res = await fetch(url)
+    const blob = await res.blob()
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.readAsDataURL(blob)
+    })
+  } catch { return null }
 }

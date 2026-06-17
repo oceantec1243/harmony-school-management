@@ -94,8 +94,8 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
     teacher: isEnglish ? "Class Teacher" : "Le Professeur Principal",
     period: isEnglish ? "PERIOD" : "PÉRIODE",
     avg: isEnglish ? "AVERAGE" : "MOYENNE",
-    minAvg: isEnglish ? "Class Min" : "Moy. du dernier",
-    maxAvg: isEnglish ? "Class Max" : "Moy. du premier",
+    minAvg: isEnglish ? "Class Min" : "Moy. Min",
+    maxAvg: isEnglish ? "Class Max" : "Moy. Max",
     council: isEnglish ? "CLASS COUNCIL SUMMARY" : "RÉCAPITULATIF DU CONSEIL DE CLASSE"
   }
 
@@ -105,8 +105,10 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
       id="bulletin-document"
     >
       {/* Watermark Logo */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.04]">
-        {schoolSettings?.logo_url && <img src={schoolSettings.logo_url} className="w-[300px] h-[300px] object-contain grayscale" alt="" />}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.05]">
+        {(schoolSettings?.logo_url || bulletinData.schoolSettings?.logo_url) && (
+          <img src={schoolSettings?.logo_url || bulletinData.schoolSettings?.logo_url} className="w-[400px] h-[400px] object-contain grayscale" alt="" />
+        )}
       </div>
 
       {/* Header (Bilingual Cameroon Style) */}
@@ -118,7 +120,9 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
             <p>**********</p>
             <p>Ministère des Enseignements Secondaires</p>
           </div>
-          {schoolSettings?.logo_url && <img src={schoolSettings.logo_url} className="h-14 w-14 object-contain" alt="Logo" />}
+          {(schoolSettings?.logo_url || bulletinData.schoolSettings?.logo_url) && (
+            <img src={schoolSettings?.logo_url || bulletinData.schoolSettings?.logo_url} className="h-16 w-16 object-contain" alt="Logo" />
+          )}
           <div className="text-center leading-tight">
             <p>Republic of Cameroon</p>
             <p>Peace - Work - Fatherland</p>
@@ -129,9 +133,9 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
 
         <div className="text-center">
           <h1 className="text-lg font-black text-blue-900 leading-none">
-            {schoolSettings?.school_name || "HARMONY SCHOOL"}
+            {schoolSettings?.school_name || bulletinData.schoolSettings?.school_name || "HARMONY SCHOOL"}
           </h1>
-          <p className="text-[10px] text-slate-600 italic">{schoolSettings?.school_slogan}</p>
+          <p className="text-[10px] text-slate-600 italic">{schoolSettings?.school_slogan || bulletinData.schoolSettings?.school_slogan}</p>
           <div className="inline-block mt-1 px-4 py-0.5 bg-slate-900 text-white rounded font-bold uppercase text-sm">
             {t.title}
           </div>
@@ -229,94 +233,88 @@ export function BulletinDocument({ bulletinData, schoolSettings }: BulletinDocum
         </table>
       </div>
 
-      {/* Summary Tables */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-        {/* Left: Trim Summary + General Stats */}
-        <div className="space-y-4">
-          {isAnnual && trimesterSummaries && (
-            <div>
-              <p className="text-[10px] font-bold mb-1 uppercase text-slate-500">{t.council}</p>
-              <table className="w-full text-[9px] border-collapse border border-slate-400">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="border border-slate-400 p-1">{t.period}</th>
-                    <th className="border border-slate-400 p-1">{t.avg}</th>
-                    <th className="border border-slate-400 p-1">{t.rank}</th>
+      {/* Summary Section */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+        {/* Left: Trim Summary Table */}
+        {isAnnual && trimesterSummaries && (
+          <div className="space-y-1">
+            <p className="text-[9px] font-bold uppercase text-slate-500">{t.council}</p>
+            <table className="w-full text-[9px] border-collapse border border-slate-400">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="border border-slate-400 p-1">{t.period}</th>
+                  <th className="border border-slate-400 p-1">{t.avg}</th>
+                  <th className="border border-slate-400 p-1">{t.rank}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {trimesterSummaries.map((ts, idx) => (
+                  <tr key={idx}>
+                    <td className="border border-slate-400 p-1 font-bold">{isEnglish ? "TERM" : "TRIMESTRE"} {idx + 1}</td>
+                    <td className="border border-slate-400 p-1 text-center">{typeof ts.average === 'number' ? ts.average.toFixed(2) : ts.average}</td>
+                    <td className="border border-slate-400 p-1 text-center">{formatRankValue(ts.rank)}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  {trimesterSummaries.map((ts, idx) => (
-                    <tr key={idx}>
-                      <td className="border border-slate-400 p-1 font-bold">{isEnglish ? "TERM" : "TRIMESTRE"} {idx + 1}</td>
-                      <td className="border border-slate-400 p-1 text-center">{typeof ts.average === 'number' ? ts.average.toFixed(2) : ts.average}</td>
-                      <td className="border border-slate-400 p-1 text-center">{formatRankValue(ts.rank)}</td>
-                    </tr>
-                  ))}
-                  <tr className="bg-blue-50 font-black">
-                    <td className="border border-slate-400 p-1 text-blue-900 uppercase">{t.ann}</td>
-                    <td className="border border-slate-400 p-1 text-center text-blue-900 text-sm">{average.toFixed(2)}</td>
-                    <td className="border border-slate-400 p-1 text-center text-blue-900 text-sm">{formatRankValue(rank)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          <div className="border border-slate-400 p-3 rounded space-y-1.5 text-xs">
-            <div className="flex justify-between border-b border-slate-200 pb-0.5">
-              <span className="font-bold">{t.genAvg}:</span>
-              <span className="text-base font-black text-blue-900">{average.toFixed(2)}/20</span>
-            </div>
-            <div className="flex justify-between border-b border-slate-200 pb-0.5">
-              <span className="font-bold">{t.rank}:</span>
-              <span>{formatRankValue(rank)} {isEnglish ? "out of" : "sur"} {classSize}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[10px]">
-              <div className="flex justify-between">
-                <span className="text-slate-500">{t.classAvg}:</span>
-                <span className="font-bold">{classAverage.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">{t.maxAvg}:</span>
-                <span className="font-bold">{classMax.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">{t.minAvg}:</span>
-                <span className="font-bold">{classMin.toFixed(2)}</span>
-              </div>
-            </div>
+                ))}
+              </tbody>
+            </table>
           </div>
+        )}
+
+        {/* Right: Final Results Table */}
+        <div className="space-y-1">
+          <p className="text-[9px] font-bold uppercase text-slate-500">{isEnglish ? "FINAL RESULTS" : "RÉSULTATS FINAUX"}</p>
+          <table className="w-full text-[9px] border-collapse border border-slate-400">
+            <tbody>
+              <tr className="bg-blue-50">
+                <td className="border border-slate-400 p-1 font-bold">{t.genAvg}</td>
+                <td className="border border-slate-400 p-1 text-center font-black text-blue-900">{average.toFixed(2)}/20</td>
+              </tr>
+              <tr>
+                <td className="border border-slate-400 p-1 font-bold">{t.rank}</td>
+                <td className="border border-slate-400 p-1 text-center">{formatRankValue(rank)} {isEnglish ? "out of" : "sur"} {classSize}</td>
+              </tr>
+              <tr>
+                <td className="border border-slate-400 p-1 font-bold">{t.classAvg}</td>
+                <td className="border border-slate-400 p-1 text-center">{classAverage?.toFixed(2) || "---"}</td>
+              </tr>
+              <tr>
+                <td className="border border-slate-400 p-1 font-bold">{t.maxAvg}</td>
+                <td className="border border-slate-400 p-1 text-center">{classMax?.toFixed(2) || "---"}</td>
+              </tr>
+              <tr>
+                <td className="border border-slate-400 p-1 font-bold">{t.minAvg}</td>
+                <td className="border border-slate-400 p-1 text-center">{classMin?.toFixed(2) || "---"}</td>
+              </tr>
+              <tr className="bg-slate-100 font-bold">
+                <td className="border border-slate-400 p-1">{t.dec}</td>
+                <td className="border border-slate-400 p-1 text-center text-blue-900">
+                  {isAnnual && promotion ? promotion.decision.toUpperCase() : distinction.toUpperCase()}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
+      </div>
 
-        {/* Right: Decision and Signatures */}
-        <div className="space-y-6">
-          <div className="bg-slate-50 p-3 border-l-4 border-slate-900">
-            <p className="font-black uppercase text-[10px] text-slate-500 mb-1">{t.dec}:</p>
-            <p className="text-sm font-black text-slate-900 leading-tight">
-              {isAnnual && promotion ? promotion.decision.toUpperCase() : distinction.toUpperCase()}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 text-[9px] font-bold text-center pt-2">
-            <div className="space-y-10">
-              <p>{t.parent}</p>
-              <div className="border-t border-dotted border-slate-400 pt-1" />
-            </div>
-            <div className="space-y-10">
-              <p>{t.principal}</p>
-              <div className="border-t border-dotted border-slate-400 pt-1" />
-            </div>
-            <div className="space-y-10">
-              <p>{t.teacher}</p>
-              <div className="border-t border-dotted border-slate-400 pt-1" />
-            </div>
-          </div>
+      {/* Signatures */}
+      <div className="mt-6 grid grid-cols-3 gap-2 text-[9px] font-bold text-center">
+        <div className="space-y-10">
+          <p>{t.parent}</p>
+          <div className="border-t border-dotted border-slate-400 pt-1" />
+        </div>
+        <div className="space-y-10">
+          <p>{t.principal}</p>
+          <div className="border-t border-dotted border-slate-400 pt-1" />
+        </div>
+        <div className="space-y-10">
+          <p>{t.teacher}</p>
+          <div className="border-t border-dotted border-slate-400 pt-1" />
         </div>
       </div>
 
       {/* Bottom Legal Notice */}
-      <div className="mt-4 pt-2 border-t border-slate-200 text-center text-[7px] text-slate-400 uppercase tracking-widest">
-        {schoolSettings?.school_name} - HARMONY School Management - © OceanTechnologie 2026
+      <div className="mt-4 pt-1 border-t border-slate-200 text-center text-[7px] text-slate-400 uppercase tracking-widest">
+        généré par Harmony by OceanTechnologie
       </div>
     </div>
   )

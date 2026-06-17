@@ -53,6 +53,8 @@ type LocalBulletinData = {
   rank: number | string
   classSize: number
   classAverage: number
+  classMin: number
+  classMax: number
   isUnranked: boolean
   section?: string
   promotion?: { promoted: boolean; nextClass: string | null; decision: string }
