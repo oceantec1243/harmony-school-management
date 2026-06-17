@@ -182,22 +182,27 @@ export default function BulletinsPage() {
       if (isAnnual) {
         const yearPeriods = periods.filter(p => p.academic_year === academicYear)
         const yearSeqs = yearPeriods.filter(p => p.type === "sequence")
-        const yearTrims = yearPeriods.filter(p => p.type === "trimester")
+        const yearTrims = yearPeriods.filter(p => p.type === "trimester").sort((a, b) => a.number - b.number)
         
-        // SCOPED QUERY: Only fetch grades for students in THIS class
+        // Fetch ALL grades for ranking and display for ALL sequences of the year
         const { data: allClassGrades } = await supabase
           .from("grades")
           .select("student_id, subject_id, score, academic_period_id")
-          .in("student_id", classStudentIds)
           .in("academic_period_id", yearSeqs.map(s => s.id))
         
         const myGrades = (allClassGrades || []).filter(g => g.student_id === studentId)
 
         subjects.forEach(s => {
-          const sGrades = myGrades.filter(g => g.subject_id === s.id)
+          const subjGrades = myGrades.filter(g => g.subject_id === s.id)
           const trimAvgs = yearTrims.map(trim => {
-            const tSeqs = yearSeqs.filter(seq => seq.parent_id === trim.id || (trim.number === 1 && seq.number <= 2) || (trim.number === 2 && seq.number >= 3 && seq.number <= 4) || (trim.number === 3 && seq.number >= 5))
-            const tGrades = sGrades.filter(g => tSeqs.some(ts => ts.id === g.academic_period_id))
+            // Trim 1: Seq 1,2 | Trim 2: Seq 3,4 | Trim 3: Seq 5,6
+            const tSeqs = yearSeqs.filter(seq => 
+              seq.parent_id === trim.id || 
+              (trim.number === 1 && seq.number <= 2) || 
+              (trim.number === 2 && seq.number >= 3 && seq.number <= 4) || 
+              (trim.number === 3 && seq.number >= 5)
+            )
+            const tGrades = subjGrades.filter(g => tSeqs.some(ts => ts.id === g.academic_period_id))
             if (tGrades.length === 0) return "NC"
             return Math.round((tGrades.reduce((sum, g) => sum + g.score, 0) / tGrades.length) * 100) / 100
           })
@@ -208,16 +213,22 @@ export default function BulletinsPage() {
           s.annual = annualAvg
           if (typeof annualAvg === 'number') grades[s.id] = { score: annualAvg, coefficient: s.coefficient }
 
-          // Calculate subject rank among CLASSMATES
+          // Calculate subject rank among CLASSMATES for the year
           const otherAvgs = students.filter(os => os.is_ranked !== false).map(os => {
             const osG = (allClassGrades || []).filter(g => g.student_id === os.id && g.subject_id === s.id)
-            return osG.length > 0 ? osG.reduce((sum, g) => sum + g.score, 0) / osG.length : null
+            if (osG.length === 0) return null
+            const osTrimAvgs = yearTrims.map(trim => {
+              const tSeqs = yearSeqs.filter(seq => seq.parent_id === trim.id || (trim.number === 1 && seq.number <= 2) || (trim.number === 2 && seq.number >= 3 && seq.number <= 4) || (trim.number === 3 && seq.number >= 5))
+              const tg = osG.filter(g => tSeqs.some(ts => ts.id === g.academic_period_id))
+              return tg.length > 0 ? tg.reduce((sum, g) => sum + g.score, 0) / tg.length : null
+            }).filter(v => v !== null) as number[]
+            return osTrimAvgs.length > 0 ? osTrimAvgs.reduce((a, b) => a + b, 0) / osTrimAvgs.length : null
           }).filter(v => v !== null) as number[]
           
           if (typeof annualAvg === 'number' && otherAvgs.length > 0) {
             const sorted = otherAvgs.sort((a,b) => b-a)
             let r = 1
-            for (const v of sorted) { if (v > annualAvg) r++; else break }
+            for (const v of sorted) { if (v > annualAvg + 0.001) r++; }
             s.rank = `${r}/${sorted.length}`
           }
         })
